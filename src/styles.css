@@ -1,0 +1,275 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap");
+
+:root {
+  font-family: "DM Sans", sans-serif;
+  color: #20221f;
+  background: #f4f2eb;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 0.68rem 1rem;
+  background: #252b28;
+  color: white;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+header {
+  height: 68px;
+  padding: 0 max(24px, calc((100vw - 1240px) / 2));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fffefa;
+  border-bottom: 1px solid #ddd9ce;
+}
+.brand,
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand span,
+h1 {
+  font-family: "Fraunces", serif;
+}
+.header-actions {
+  color: #64675f;
+  font-size: 0.9rem;
+}
+.ghost {
+  background: transparent;
+  color: #343934;
+  border: 1px solid #d8d7ce;
+}
+main {
+  width: min(1240px, calc(100% - 40px));
+  margin: 48px auto;
+}
+.title-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+h1 {
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  margin: 4px 0;
+  letter-spacing: -0.03em;
+}
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #777b72;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.search {
+  width: min(360px, 100%);
+  background: white;
+  border: 1px solid #d8d7ce;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+.search input {
+  width: 100%;
+  padding: 0.8rem 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 30px 0;
+}
+.metric {
+  padding: 20px;
+  border: 1px solid #ddd9ce;
+  border-radius: 14px;
+  background: #fffefa;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+.metric div {
+  grid-row: span 2;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #ecede8;
+}
+.metric span {
+  color: #73776e;
+  font-size: 0.86rem;
+}
+.metric strong {
+  font-size: 1.65rem;
+}
+.notice,
+.error {
+  padding: 12px 14px;
+  margin: 14px 0;
+  border-radius: 9px;
+  background: #e9eee7;
+  color: #334638;
+}
+.error {
+  background: #fbe9e5;
+  color: #8d2f1d;
+}
+.table-card {
+  overflow-x: auto;
+  border: 1px solid #ddd9ce;
+  border-radius: 14px;
+  background: #fffefa;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 850px;
+}
+th,
+td {
+  padding: 16px 18px;
+  text-align: left;
+  border-bottom: 1px solid #ebe8df;
+}
+th {
+  color: #74776f;
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+td {
+  font-size: 0.9rem;
+}
+td small {
+  display: block;
+  color: #81847d;
+  margin-top: 4px;
+}
+.status {
+  text-transform: capitalize;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #eee;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.status.active {
+  background: #dfeee2;
+  color: #27643a;
+}
+.status.expired,
+.status.revoked {
+  background: #f8e2dc;
+  color: #953b29;
+}
+.actions {
+  display: flex;
+  gap: 7px;
+}
+.actions button {
+  padding: 0.55rem 0.7rem;
+  font-size: 0.8rem;
+}
+.actions .danger {
+  background: #a6402d;
+}
+.empty {
+  text-align: center;
+  padding: 42px;
+  color: #777;
+}
+.login-shell,
+.centered {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.login-card {
+  width: min(430px, 100%);
+  padding: 38px;
+  border: 1px solid #ddd9ce;
+  border-radius: 18px;
+  background: #fffefa;
+  box-shadow: 0 18px 60px #45413814;
+}
+.login-card h1 {
+  font-size: 2.2rem;
+  margin-bottom: 30px;
+}
+.login-card label {
+  display: grid;
+  gap: 7px;
+  margin: 16px 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.login-card input {
+  border: 1px solid #cbc9c0;
+  border-radius: 8px;
+  padding: 0.8rem;
+  background: white;
+}
+.login-card > button {
+  width: 100%;
+  margin-top: 10px;
+}
+.mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: #252b28;
+  color: white;
+}
+.centered {
+  align-content: center;
+  text-align: center;
+  color: #4d514b;
+}
+.centered button {
+  margin: 0 auto;
+}
+@media (max-width: 760px) {
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+  .title-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .header-actions span {
+    display: none;
+  }
+}
