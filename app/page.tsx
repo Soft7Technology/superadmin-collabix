@@ -1,3 +1,5 @@
+"use client";
+
 import {
   type FormEvent,
   useCallback,
@@ -14,8 +16,8 @@ import {
   Shield,
   Trash2,
 } from "lucide-react";
-import { api, apiErrorMessage } from "./api";
-import type { Organization, User } from "./types";
+import { api, apiErrorMessage } from "../src/api";
+import type { Organization, User } from "../src/types";
 
 type SessionState = "loading" | "guest" | "authenticated" | "forbidden";
 

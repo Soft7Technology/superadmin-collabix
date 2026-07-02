@@ -1,7 +1,7 @@
 import axios from "axios";
 import type { Organization, User } from "./types";
 
-const origin = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+const origin = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 const readCookie = (name: string) =>
   document.cookie
