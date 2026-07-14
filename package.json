@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --turbo -p 8081",
+    "dev": "next dev --turbo -p 8002",
     "build": "next build",
-    "start": "next start -p 8081",
+    "start": "next start -p 8002",
     "lint": "next lint"
   },
   "dependencies": {
