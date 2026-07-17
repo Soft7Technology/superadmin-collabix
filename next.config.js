@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  outputFileTracingRoot: typeof __dirname !== "undefined" ? __dirname : process.cwd(),
   async rewrites() {
     const backendUrl = process.env.BACKEND_URL || (process.env.NODE_ENV === "production" ? "https://collabixapi.soft7.in" : "http://localhost:8000");
     return [

@@ -1,7 +1,7 @@
 import "../src/styles.css";
 
 export const metadata = {
-  title: "Collabix Superadmin Control",
+  title: "SOFT7 Superadmin Control",
   description: "Platform operations management portal.",
 };
 

@@ -122,10 +122,10 @@ export default function App() {
   ]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTabKey>("general");
-  const [platformName, setPlatformName] = useState("Pulseboard");
-  const [supportEmail, setSupportEmail] = useState("support@pulseboard.io");
+  const [platformName, setPlatformName] = useState("SOFT7");
+  const [supportEmail, setSupportEmail] = useState("support@soft7.in");
   const [defaultTimezone, setDefaultTimezone] = useState("IST — Asia/Kolkata");
-  const [accentColor, setAccentColor] = useState("#5B4CD6");
+  const [accentColor, setAccentColor] = useState("#3cdb73");
 
   // Load backend data
   const loadOrganizations = useCallback(async () => {
@@ -289,7 +289,57 @@ export default function App() {
       {/* SIDEBAR NAVIGATION */}
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">P</div>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 32 32"
+            style={{ width: "30px", height: "30px", flexShrink: 0 }}
+            fill="none"
+          >
+            {/* Laptop Base / Chassis in Green */}
+            <path
+              d="M2 23.5h28v1.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1.5z"
+              fill="#3cdb73"
+            />
+            {/* Trackpad notch */}
+            <path
+              d="M12 23.5h8V24a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-.5z"
+              fill="#1fa652"
+            />
+            {/* Laptop Screen frame in Green */}
+            <rect
+              x="4"
+              y="7"
+              width="24"
+              height="16.5"
+              rx="2"
+              fill="none"
+              stroke="#3cdb73"
+              strokeWidth="2.5"
+            />
+            {/* Laptop Screen inside (dark/translucent area) */}
+            <rect
+              x="5.5"
+              y="8.5"
+              width="21"
+              height="13.5"
+              fill="#1f2937"
+              rx="0.5"
+              opacity="0.05"
+            />
+
+            {/* Green Speech Bubble */}
+            <circle cx="21.5" cy="8.5" r="5.5" fill="#3cdb73" />
+            <path
+              d="M18.5 12.5l2-3.5 3 1.5z"
+              fill="#3cdb73"
+            />
+
+            {/* White Infinity Symbol inside Bubble */}
+            <path
+              d="M21.5 9.2c-.4-.5-.9-.8-1.5-.8a1.2 1.2 0 1 0 0 2.4c.6 0 1.1-.3 1.5-.8.4.5.9.8 1.5.8a1.2 1.2 0 1 0 0-2.4c-.6 0-1.1.3-1.5.8z"
+              fill="white"
+            />
+          </svg>
           <div>
             <div className="brand-name">{platformName}</div>
             <div className="brand-sub">Platform console</div>
@@ -946,10 +996,10 @@ export default function App() {
                   <button
                     className="swatch"
                     style={{
-                      background: "#5B4CD6",
-                      border: accentColor === "#5B4CD6" ? "2px solid var(--text)" : "none",
+                      background: "#3cdb73",
+                      border: accentColor === "#3cdb73" ? "2px solid var(--text)" : "none",
                     }}
-                    onClick={() => setAccentColor("#5B4CD6")}
+                    onClick={() => setAccentColor("#3cdb73")}
                   />
                   <button
                     className="swatch"
