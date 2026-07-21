@@ -578,7 +578,21 @@ export default function App() {
                         <td>
                           <button
                             className="row-action"
-                            onClick={() => triggerToast(`Impersonating ${org.name}...`)}
+                            disabled={busy === org.id}
+                            onClick={async () => {
+                              setBusy(org.id);
+                              triggerToast(`Impersonating ${org.name}...`);
+                              try {
+                                const res = await api.impersonate(org.id);
+                                triggerToast(`Switching workspace context...`);
+                                setTimeout(() => {
+                                  window.location.href = res.redirectUrl || "http://localhost:8001";
+                                }, 800);
+                              } catch (error) {
+                                triggerToast(apiErrorMessage(error, "Impersonation failed."));
+                                setBusy(null);
+                              }
+                            }}
                           >
                             Impersonate
                           </button>
