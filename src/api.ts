@@ -44,9 +44,7 @@ export const api = {
   revoke: (id: string) => http.post(`/api/super/organizations/${id}/revoke`),
   remove: (id: string) => http.delete(`/api/super/organizations/${id}`),
   impersonate: async (id: string) => {
-    const { data } = await http.post<{ message: string; redirectUrl: string }>(
-      `/api/super/organizations/${id}/impersonate`
-    );
+    const { data } = await http.post<{ message: string; redirectUrl?: string; user?: any }>(`/api/super/organizations/${id}/impersonate`);
     return data;
   },
 };
