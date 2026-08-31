@@ -1,0 +1,29 @@
+{
+  "name": "collabix-superadmin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 8002",
+    "build": "next build",
+    "start": "next start -p 8002",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@next/swc-wasm-nodejs": "^15.5.24",
+    "axios": "^1.7.9",
+    "caniuse-lite": "^1.0.30001810",
+    "lucide-react": "^0.575.0",
+    "next": "^15.5.20",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^9.32.0",
+    "eslint-config-next": "^15.1.0",
+    "typescript": "^5.8.3"
+  }
+}
