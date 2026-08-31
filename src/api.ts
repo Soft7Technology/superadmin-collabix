@@ -43,6 +43,10 @@ export const api = {
   approve: (id: string) => http.post(`/api/super/organizations/${id}/approve`),
   revoke: (id: string) => http.post(`/api/super/organizations/${id}/revoke`),
   remove: (id: string) => http.delete(`/api/super/organizations/${id}`),
+  createOrganization: async (payload: { name: string; ownerEmail?: string }) => {
+    const { data } = await http.post<Organization>("/api/super/organizations", payload);
+    return data;
+  },
   impersonate: async (id: string) => {
     const { data } = await http.post<{ message: string; redirectUrl?: string; user?: any }>(`/api/super/organizations/${id}/impersonate`);
     return data;

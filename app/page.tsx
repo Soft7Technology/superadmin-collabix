@@ -9,8 +9,10 @@ import {
 } from "react";
 import {
   Ban,
+  BarChart2,
   Building2,
   CheckCircle2,
+  Eye,
   LogOut,
   Search,
   Shield,
@@ -78,12 +80,8 @@ export default function App() {
   const [newOrgPlan, setNewOrgPlan] = useState<"Starter" | "Pro" | "Enterprise">("Pro");
   const [newOrgEmail, setNewOrgEmail] = useState("");
 
-  // Interactive UI mock states
-  const [mockUsers, setMockUsers] = useState([
-    { name: "Ankit Kapoor", initials: "AK", org: "Nimbus Retail", role: "Manager", status: "Active" },
-    { name: "Maya Verma", initials: "MV", org: "Nimbus Retail", role: "Org admin", status: "Active" },
-    { name: "Jason Rao", initials: "JR", org: "Harborline", role: "Employee", status: "Suspended" },
-  ]);
+  // Users — loaded from backend
+  const [mockUsers, setMockUsers] = useState<{ name: string; initials: string; org: string; role: string; status: string }[]>([]);
 
   const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([
     { id: "mon", label: "Screen monitoring", sub: "Enable tracking module for all orgs", enabled: true },
@@ -101,25 +99,14 @@ export default function App() {
     { id: "auto", label: "Auto-suspend on repeated breach attempts", sub: "Lock org after 5 failed admin logins", enabled: true },
   ]);
 
-  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([
-    { id: "1", title: "Can't invite new employees — role dropdown empty", orgName: "Fernbridge Co.", openedAt: "2 hr ago" },
-    { id: "2", title: "Billing shows wrong seat count", orgName: "Harborline", openedAt: "yesterday" },
-    { id: "3", title: "Request to restore deleted project", orgName: "Greytown Media", openedAt: "2 days ago" },
-  ]);
+  // Support tickets — loaded from backend
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
 
-  const [systemLogs, setSystemLogs] = useState<SystemLog[]>([
-    { id: "1", category: "info", message: "Sana Prakash impersonated Nimbus Retail", timestamp: "10 min ago" },
-    { id: "2", category: "sec", message: "3 failed login attempts — Harborline admin", timestamp: "1 hr ago" },
-    { id: "3", category: "sys", message: 'Feature flag "Custom branding" enabled globally', timestamp: "Yesterday" },
-    { id: "4", category: "info", message: "Greytown Media subscription suspended — payment failed", timestamp: "2 days ago" },
-    { id: "5", category: "sys", message: "Nightly backup completed — 142 organizations", timestamp: "2 days ago" },
-  ]);
+  // System logs — loaded from backend
+  const [systemLogs, setSystemLogs] = useState<SystemLog[]>([]);
 
-  const [invoices, setInvoices] = useState<Invoice[]>([
-    { orgName: "Nimbus Retail", plan: "Enterprise plan", amount: "$1,240.00", date: "Jul 01", status: "Paid" },
-    { orgName: "Harborline", plan: "Pro plan", amount: "$79.00", date: "Jul 01", status: "Paid" },
-    { orgName: "Greytown Media", plan: "Pro plan", amount: "Payment failed", date: "Jun 28", status: "Failed" },
-  ]);
+  // Invoices — loaded from backend
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTabKey>("general");
   const [platformName, setPlatformName] = useState("SOFT7");
@@ -210,27 +197,18 @@ export default function App() {
     );
   }, [supportTickets, searchQuery]);
 
-  // Create new organization handler (mock frontend insertion)
-  const handleCreateOrg = () => {
+  // Create new organization handler — calls backend API
+  const handleCreateOrg = async () => {
     if (!newOrgName.trim()) {
       triggerToast("Organization Name is required");
       return;
     }
-    const newOrg: Organization = {
-      id: `org-${Date.now()}`,
-      name: newOrgName.trim(),
-      phone: "—",
-      ownerName: newOrgEmail.trim() ? newOrgEmail.split("@")[0] : "New Owner",
-      ownerEmail: newOrgEmail.trim() || "owner@example.com",
-      subscriptionStatus: "trial",
-      trialEndsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-      isApproved: false,
-      createdAt: new Date().toISOString(),
-    };
-    
-    setOrganizations((prev) => [newOrg, ...prev]);
+    await runBackendAction(
+      "create-org",
+      () => api.createOrganization({ name: newOrgName.trim(), ownerEmail: newOrgEmail.trim() || undefined }),
+      `"${newOrgName}" organization created!`,
+    );
     setIsModalOpen(false);
-    triggerToast(`"${newOrgName}" organization created!`);
     setNewOrgName("");
     setNewOrgDomain("");
     setNewOrgEmail("");
@@ -461,42 +439,57 @@ export default function App() {
             <div className="stats">
               <div className="stat-card">
                 <div className="stat-num">{totalOrganizations}</div>
-                <div className="stat-label">Organizations</div>
-                <div className="stat-delta up">+6 this month</div>
+                <div className="stat-label">Total Organizations</div>
+                <div className="stat-delta up">Live database</div>
               </div>
               <div className="stat-card">
-                <div className="stat-num">3,208</div>
-                <div className="stat-label">Total users</div>
-                <div className="stat-delta up">+184 this month</div>
+                <div className="stat-num">{activeSubscriptions}</div>
+                <div className="stat-label">Active Workspaces</div>
+                <div className="stat-delta up">Approved &amp; active</div>
               </div>
               <div className="stat-card">
-                <div className="stat-num">$48.2k</div>
-                <div className="stat-label">MRR</div>
-                <div className="stat-delta up">+3.4%</div>
+                <div className="stat-num">{trialSubscriptions}</div>
+                <div className="stat-label">On Free Trial</div>
+                <div className="stat-delta up">Trial status</div>
               </div>
               <div className="stat-card">
-                <div className="stat-num">2.1%</div>
-                <div className="stat-label">Churn rate</div>
-                <div className="stat-delta down">+0.3%</div>
+                <div className="stat-num">{suspendedCount}</div>
+                <div className="stat-label">Suspended / Expired</div>
+                <div className="stat-delta down">Requires review</div>
               </div>
             </div>
 
             <div className="panel-head">
-              <h2>Platform activity</h2>
+              <h2>Recent Platform Activity</h2>
             </div>
-            <div className="card" style={{ padding: "2px 12px" }}>
-              {systemLogs.slice(0, 4).map((log) => (
-                <div className="log-row" key={log.id}>
-                  <span>
-                    <span className={`log-tag ${log.category}`}>
-                      {log.category === "info" ? "Org" : log.category === "sec" ? "Security" : "System"}
+            {organizations.length > 0 ? (
+              <div className="card" style={{ padding: "4px 14px" }}>
+                {organizations.slice(0, 5).map((org) => (
+                  <div className="log-row" key={org.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span className={`log-tag ${org.isApproved ? "info" : "sec"}`}>
+                        {org.isApproved ? "Active" : "Trial"}
+                      </span>
+                      <span style={{ fontWeight: 600, color: "var(--ink)" }}>{org.name}</span>
+                      <span style={{ fontSize: "12px", color: "var(--muted)" }}>({org.ownerEmail || org.id})</span>
+                    </div>
+                    <span className="t" style={{ fontSize: "12px", color: "var(--muted)" }}>
+                      {org.createdAt ? new Date(org.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : "Recently added"}
                     </span>
-                    {log.message}
-                  </span>
-                  <span className="t">{log.timestamp}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-invoices-card">
+                <div className="empty-invoices-icon">
+                  <Building2 size={20} />
                 </div>
-              ))}
-            </div>
+                <div className="empty-invoices-title">No platform activity yet</div>
+                <div className="empty-invoices-sub">
+                  When new organizations sign up or update their subscriptions, their events will appear here in real-time.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 2. ORGANIZATIONS SCREEN (Connected to Backend API) */}
@@ -576,66 +569,70 @@ export default function App() {
                         </td>
                         <td>{new Date(org.trialEndsAt).toLocaleDateString()}</td>
                         <td>
-                          <button
-                            className="row-action"
-                            disabled={busy === org.id}
-                            onClick={async () => {
-                              setBusy(org.id);
-                              triggerToast(`Impersonating ${org.name}...`);
-                              try {
-                                const res = await api.impersonate(org.id);
-                                triggerToast(`Switching workspace context...`);
-                                setTimeout(() => {
-                                  window.location.href = res.redirectUrl || "http://localhost:8001";
-                                }, 800);
-                              } catch (error) {
-                                triggerToast(apiErrorMessage(error, "Impersonation failed."));
-                                setBusy(null);
-                              }
-                            }}
-                          >
-                            Impersonate
-                          </button>
-                          {org.isApproved ? (
+                          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                            <button
+                              className="row-action btn-impersonate"
+                              disabled={busy === org.id}
+                              title="Impersonate & log in to this workspace"
+                              onClick={async () => {
+                                setBusy(org.id);
+                                triggerToast(`Impersonating ${org.name}...`);
+                                try {
+                                  const res = await api.impersonate(org.id);
+                                  triggerToast(`Workspace opened in new tab!`);
+                                  window.open(res.redirectUrl || "http://localhost:8001", "_blank");
+                                } catch (error) {
+                                  triggerToast(apiErrorMessage(error, "Impersonation failed."));
+                                } finally {
+                                  setBusy(null);
+                                }
+                              }}
+                            >
+                              <Eye size={12} /> Impersonate
+                            </button>
+                            {org.isApproved ? (
+                              <button
+                                className="row-action btn-suspend danger"
+                                disabled={busy === org.id}
+                                title="Suspend organization access"
+                                onClick={() =>
+                                  void runBackendAction(
+                                    org.id,
+                                    () => api.revoke(org.id),
+                                    `Suspended ${org.name}`,
+                                  )
+                                }
+                              >
+                                <Ban size={12} /> Suspend
+                              </button>
+                            ) : (
+                              <button
+                                className="row-action btn-approve"
+                                disabled={busy === org.id}
+                                title="Approve organization"
+                                onClick={() =>
+                                  void runBackendAction(
+                                    org.id,
+                                    () => api.approve(org.id),
+                                    `Approved ${org.name}`,
+                                  )
+                                }
+                              >
+                                <CheckCircle2 size={12} /> Approve
+                              </button>
+                            )}
                             <button
                               className="row-action danger"
                               disabled={busy === org.id}
-                              onClick={() =>
-                                void runBackendAction(
-                                  org.id,
-                                  () => api.revoke(org.id),
-                                  `Suspended ${org.name}`,
-                                )
-                              }
+                              title="Delete organization"
+                              onClick={() => {
+                                setOrgToDelete(org);
+                                setIsDeleteModalOpen(true);
+                              }}
                             >
-                              Suspend
+                              <Trash2 size={12} /> Delete
                             </button>
-                          ) : (
-                            <button
-                              className="row-action"
-                              style={{ color: "var(--teal)" }}
-                              disabled={busy === org.id}
-                              onClick={() =>
-                                void runBackendAction(
-                                  org.id,
-                                  () => api.approve(org.id),
-                                  `Approved ${org.name}`,
-                                )
-                              }
-                            >
-                              Approve
-                            </button>
-                          )}
-                          <button
-                            className="row-action danger"
-                            disabled={busy === org.id}
-                            onClick={() => {
-                              setOrgToDelete(org);
-                              setIsDeleteModalOpen(true);
-                            }}
-                          >
-                            Delete
-                          </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -740,43 +737,133 @@ export default function App() {
             </div>
           </div>
 
-          {/* 4. PLANS SCREEN (Mock client side) */}
+          {/* 4. PLANS SCREEN */}
           <div className={`page ${activePage === "plans" ? "active" : ""}`}>
-            <h1 className="page-title">Plans &amp; billing</h1>
-            <p className="page-sub">Manage subscription tiers and review recent invoices.</p>
+            <h1 className="page-title">Available Workspace Plans</h1>
+            <p className="page-sub">
+              Compare features and choose the tier that matches your team size and workflow needs.
+            </p>
 
             <div className="plans-grid">
-              <div className="plan-card">
-                <h3>Starter</h3>
-                <div className="plan-price">$29<span>/mo per org</span></div>
-                <div className="plan-feat">Up to 10 users</div>
-                <div className="plan-feat">Projects, board, tasks</div>
-                <div className="plan-feat">No screen monitoring</div>
-                <button className="btn btn-sm" onClick={() => triggerToast("Starter plan editor opened")}>
-                  Edit plan
-                </button>
-              </div>
-
+              {/* Pro Plan Card (Featured) */}
               <div className="plan-card featured">
-                <span className="badge-featured">Most used</span>
-                <h3>Pro</h3>
-                <div className="plan-price">$79<span>/mo per org</span></div>
-                <div className="plan-feat">Up to 50 users</div>
-                <div className="plan-feat">Screen monitoring included</div>
-                <div className="plan-feat">Reports &amp; integrations</div>
-                <button className="btn btn-sm" onClick={() => triggerToast("Pro plan editor opened")}>
-                  Edit plan
+                <span className="badge-featured">Most Popular</span>
+                <h3>Pro Plan</h3>
+                <p className="plan-sub">For growing teams with advanced management features.</p>
+                <div className="plan-price">
+                  ₹450 <span>/mo</span>
+                </div>
+                <hr className="plan-divider" />
+                <div className="plan-features-list">
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Up to 50 team members
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Unlimited projects
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Screenshot monitoring
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Time tracking
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Departments
+                  </div>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: "100%", height: "36px", borderRadius: "8px", fontWeight: 600, marginTop: "auto", fontSize: "13px" }}
+                  onClick={() => triggerToast("Pro plan activated")}
+                >
+                  Upgrade / Activate
                 </button>
               </div>
 
+              {/* Enterprise Plan Card */}
               <div className="plan-card">
-                <h3>Enterprise</h3>
-                <div className="plan-price">Custom</div>
-                <div className="plan-feat">Unlimited users</div>
-                <div className="plan-feat">SSO &amp; audit exports</div>
-                <div className="plan-feat">Dedicated support</div>
-                <button className="btn btn-sm" onClick={() => triggerToast("Enterprise plan editor opened")}>
-                  Edit plan
+                <div className="badge-scale">Scale &amp;<br />Custom</div>
+                <h3>Enterprise Plan</h3>
+                <p className="plan-sub">For large organizations requiring custom controls &amp; scale.</p>
+                <div className="plan-price">
+                  ₹330 <span>/mo</span>
+                </div>
+                <hr className="plan-divider" />
+                <div className="plan-features-list">
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Unlimited team members
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Unlimited projects
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> White Label
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Custom Domain
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> API Access
+                  </div>
+                </div>
+                <button
+                  className="btn"
+                  style={{
+                    width: "100%",
+                    height: "36px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    marginTop: "auto",
+                    background: "var(--paper-2)",
+                    borderColor: "var(--line)",
+                  }}
+                  onClick={() => triggerToast("Enterprise plan selected")}
+                >
+                  Choose Enterprise Plan
+                </button>
+              </div>
+
+              {/* Basic Plan Card */}
+              <div className="plan-card">
+                <h3>Basic Plan</h3>
+                <p className="plan-sub">For small teams getting started with essential task tracking.</p>
+                <div className="plan-price">
+                  ₹200 <span>/mo</span>
+                </div>
+                <hr className="plan-divider" />
+                <div className="plan-features-list">
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Up to 5 team members
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Up to 3 projects
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Unlimited tasks
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Kanban Board
+                  </div>
+                  <div className="plan-feat-check">
+                    <CheckCircle2 size={14} /> Basic task management
+                  </div>
+                </div>
+                <button
+                  className="btn"
+                  style={{
+                    width: "100%",
+                    height: "36px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    marginTop: "auto",
+                    background: "var(--paper-2)",
+                    borderColor: "var(--line)",
+                  }}
+                  onClick={() => triggerToast("Basic plan selected")}
+                >
+                  Choose Basic Plan
                 </button>
               </div>
             </div>
@@ -784,14 +871,26 @@ export default function App() {
             <div className="panel-head">
               <h2>Recent Invoices</h2>
             </div>
-            <div className="card" style={{ padding: "2px 12px" }}>
-              {invoices.map((inv, idx) => (
-                <div className="log-row" key={idx}>
-                  <span>{inv.orgName} — {inv.plan}</span>
-                  <span className="t mono">{inv.amount} · {inv.date}</span>
+            {invoices.length > 0 ? (
+              <div className="card" style={{ padding: "2px 12px" }}>
+                {invoices.map((inv, idx) => (
+                  <div className="log-row" key={idx}>
+                    <span>{inv.orgName} — {inv.plan}</span>
+                    <span className="t mono">{inv.amount} · {inv.date}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-invoices-card">
+                <div className="empty-invoices-icon">
+                  <BarChart2 size={20} />
                 </div>
-              ))}
-            </div>
+                <div className="empty-invoices-title">No recent invoices generated</div>
+                <div className="empty-invoices-sub">
+                  Billing statements and payment receipts for subscribed organizations will automatically appear here.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 5. FEATURE FLAGS SCREEN (Mock client side) */}
