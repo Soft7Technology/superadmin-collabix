@@ -13,7 +13,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "SOFT7 — Superadmin Console",
+  title: "Collabix — Superadmin Console",
   description: "Platform operations management portal.",
 };
 
