@@ -22,6 +22,7 @@ import {
   Database,
   Eye,
   EyeOff,
+  FileText,
   Filter,
   HardDrive,
   LogOut,
@@ -35,33 +36,31 @@ import {
   X,
 } from "lucide-react";
 import { api, apiErrorMessage } from "../src/api";
-import type { Organization, PlatformUser, SystemLog, User } from "../src/types";
+import type {
+  FeatureFlag,
+  Invoice,
+  Organization,
+  PlatformSettings,
+  PlatformUser,
+  SecurityPolicy,
+  SupportTicket,
+  SystemLog,
+  TicketReply,
+  User,
+} from "../src/types";
 
 type SessionState = "loading" | "guest" | "authenticated" | "forbidden";
-type PageKey = "overview" | "orgs" | "users" | "plans" | "flags" | "logs" | "security" | "support" | "settings";
+type PageKey =
+  | "overview"
+  | "orgs"
+  | "users"
+  | "plans"
+  | "flags"
+  | "logs"
+  | "security"
+  | "support"
+  | "settings";
 type SettingsTabKey = "general" | "api" | "branding";
-
-interface Invoice {
-  orgName: string;
-  plan: string;
-  amount: string;
-  date: string;
-  status: string;
-}
-
-interface SupportTicket {
-  id: string;
-  title: string;
-  orgName: string;
-  openedAt: string;
-}
-
-interface FeatureFlag {
-  id: string;
-  label: string;
-  sub: string;
-  enabled: boolean;
-}
 
 export default function App() {
   // Session & Authentication
@@ -189,6 +188,14 @@ export default function App() {
 
   // Support tickets — loaded from backend
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
+  const [ticketRepliesList, setTicketRepliesList] = useState<TicketReply[]>([]);
+  const [newTicketReplyText, setNewTicketReplyText] = useState("");
+  const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+  const [newTicketTitle, setNewTicketTitle] = useState("");
+  const [newTicketOrgId, setNewTicketOrgId] = useState("");
+  const [newTicketPriority, setNewTicketPriority] = useState("medium");
+  const [newTicketDesc, setNewTicketDesc] = useState("");
 
   // System logs — loaded from backend
   const [systemLogs, setSystemLogs] = useState<SystemLog[]>([]);
@@ -196,12 +203,19 @@ export default function App() {
 
   // Invoices — loaded from backend
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [isAddInvoiceModalOpen, setIsAddInvoiceModalOpen] = useState(false);
+  const [newInvoiceOrgId, setNewInvoiceOrgId] = useState("");
+  const [newInvoicePlan, setNewInvoicePlan] = useState("Pro");
+  const [newInvoiceAmount, setNewInvoiceAmount] = useState("₹450 /mo");
+  const [newInvoiceStatus, setNewInvoiceStatus] = useState("paid");
 
   const [settingsTab, setSettingsTab] = useState<SettingsTabKey>("general");
   const [platformName, setPlatformName] = useState("SOFT7");
   const [supportEmail, setSupportEmail] = useState("support@soft7.in");
   const [defaultTimezone, setDefaultTimezone] = useState("IST — Asia/Kolkata");
   const [accentColor, setAccentColor] = useState("#3cdb73");
+  const [apiKey, setApiKey] = useState("pk_live_51H8x••••••••••••••••e93A");
+  const [webhookSecret, setWebhookSecret] = useState("whsec_9F2b••••••••••••••••c71Z");
 
   // Load backend data
   const loadOrganizations = useCallback(async () => {
@@ -231,6 +245,152 @@ export default function App() {
     }
   }, []);
 
+  const loadFlags = useCallback(async () => {
+    try {
+      const data = await api.flags();
+      setFeatureFlags(data);
+    } catch (e) {
+      // Keep existing default state if error
+    }
+  }, []);
+
+  const loadSecurity = useCallback(async () => {
+    try {
+      const data = await api.security();
+      setSecurityFlags(data);
+    } catch (e) {
+      // Keep existing default state if error
+    }
+  }, []);
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const data = await api.settings();
+      if (data.platformName) setPlatformName(data.platformName);
+      if (data.supportEmail) setSupportEmail(data.supportEmail);
+      if (data.defaultTimezone) setDefaultTimezone(data.defaultTimezone);
+      if (data.accentColor) setAccentColor(data.accentColor);
+      if (data.apiKey) setApiKey(data.apiKey);
+      if (data.webhookSecret) setWebhookSecret(data.webhookSecret);
+    } catch (e) {
+      // Keep existing default state if error
+    }
+  }, []);
+
+  const loadTickets = useCallback(async () => {
+    try {
+      const data = await api.tickets();
+      setSupportTickets(data);
+    } catch (e) {
+      // Keep existing default state if error
+    }
+  }, []);
+
+  const handleOpenTicketDrawer = async (t: SupportTicket) => {
+    setActiveTicket(t);
+    setNewTicketReplyText("");
+    try {
+      const replies = await api.ticketReplies(t.id);
+      setTicketRepliesList(replies);
+    } catch {
+      setTicketRepliesList([]);
+    }
+  };
+
+  const handleSendTicketReply = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!activeTicket || !newTicketReplyText.trim()) return;
+    setBusy("ticket-reply");
+    try {
+      const newRep = await api.createTicketReply(activeTicket.id, {
+        message: newTicketReplyText.trim(),
+        senderName: user?.name || "Super Admin",
+        senderRole: "Super Admin",
+      });
+      setTicketRepliesList((prev) => [...prev, newRep]);
+      setNewTicketReplyText("");
+      triggerToast("Reply posted to ticket thread.");
+    } catch (err) {
+      triggerToast(apiErrorMessage(err, "Failed to post reply."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleUpdateTicketStatus = async (newStatus: string) => {
+    if (!activeTicket) return;
+    setBusy(`ticket-status-${activeTicket.id}`);
+    try {
+      await api.updateTicket(activeTicket.id, { status: newStatus });
+      setActiveTicket((prev) => (prev ? { ...prev, status: newStatus } : null));
+      await loadTickets();
+      triggerToast(`Ticket #${activeTicket.ticketNumber || activeTicket.id.slice(0, 8)} status updated to ${newStatus.toUpperCase()}`);
+    } catch (err) {
+      triggerToast(apiErrorMessage(err, "Failed to update ticket status."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleCreateTicket = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newTicketTitle.trim() || !newTicketOrgId) {
+      triggerToast("Please fill in title and select workspace.");
+      return;
+    }
+    setBusy("create-ticket");
+    try {
+      await api.createTicket({
+        title: newTicketTitle.trim(),
+        organizationId: newTicketOrgId,
+        description: newTicketDesc.trim() || undefined,
+        priority: newTicketPriority,
+      });
+      await loadTickets();
+      setIsCreateTicketModalOpen(false);
+      setNewTicketTitle("");
+      setNewTicketDesc("");
+      triggerToast("Support ticket opened successfully.");
+    } catch (err) {
+      triggerToast(apiErrorMessage(err, "Failed to open support ticket."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const loadInvoices = useCallback(async () => {
+    try {
+      const data = await api.invoices();
+      setInvoices(data);
+    } catch (e) {
+      // Keep existing default state if error
+    }
+  }, []);
+
+  const handleCreateInvoice = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newInvoiceOrgId) {
+      triggerToast("Please select an organization.");
+      return;
+    }
+    setBusy("create-invoice");
+    try {
+      await api.createInvoice({
+        organizationId: newInvoiceOrgId,
+        plan: newInvoicePlan,
+        amount: newInvoiceAmount,
+        status: newInvoiceStatus,
+      });
+      await loadInvoices();
+      setIsAddInvoiceModalOpen(false);
+      triggerToast("Invoice successfully generated and recorded.");
+    } catch (err) {
+      triggerToast(apiErrorMessage(err, "Failed to create invoice."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   useEffect(() => {
     api
       .session()
@@ -241,10 +401,28 @@ export default function App() {
         }
         setUser(currentUser);
         setSession("authenticated");
-        await Promise.all([loadOrganizations(), loadUsers(), loadLogs()]);
+        await Promise.all([
+          loadOrganizations(),
+          loadUsers(),
+          loadLogs(),
+          loadFlags(),
+          loadSecurity(),
+          loadSettings(),
+          loadTickets(),
+          loadInvoices(),
+        ]);
       })
       .catch(() => setSession("guest"));
-  }, [loadOrganizations, loadUsers, loadLogs]);
+  }, [
+    loadOrganizations,
+    loadUsers,
+    loadLogs,
+    loadFlags,
+    loadSecurity,
+    loadSettings,
+    loadTickets,
+    loadInvoices,
+  ]);
 
   // Helper to trigger toast notification
   const triggerToast = (msg: unknown) => {
@@ -353,13 +531,14 @@ export default function App() {
     return processedUsers.slice(start, start + userPageSize);
   }, [processedUsers, userPage, userPageSize]);
 
-  // Search filtering mock support tickets
+  // Search filtering support tickets
   const filteredTickets = useMemo(() => {
     const term = searchQuery.trim().toLowerCase();
     if (!term) return supportTickets;
     return supportTickets.filter((t) =>
-      [t.title, t.orgName]
-        .some((val) => val.toLowerCase().includes(term)),
+      [t.title, t.orgName, t.description, t.ticketNumber]
+        .filter(Boolean)
+        .some((val) => val!.toLowerCase().includes(term)),
     );
   }, [supportTickets, searchQuery]);
 
@@ -435,7 +614,7 @@ export default function App() {
           subscriptionStatus: editOrgStatus,
           plan: editOrgPlan,
           trialEndsAt: editOrgTrialDate ? new Date(editOrgTrialDate).toISOString() : undefined,
-          isApproved: editOrgStatus === "active",
+          isApproved: editOrgStatus !== "suspended" && editOrgStatus !== "revoked",
         });
         await Promise.all([loadOrganizations(), loadUsers(), loadLogs()]);
       },
@@ -511,13 +690,16 @@ export default function App() {
   // Calculated Stats
   const totalOrganizations = organizations.length;
   const activeSubscriptions = organizations.filter(
-    (org) => org.isApproved && org.subscriptionStatus === "active",
+    (org) => org.isApproved && (org.subscriptionStatus === "active" || !org.subscriptionStatus) && (!org.trialEndsAt || new Date(org.trialEndsAt).getTime() > Date.now()),
   ).length;
   const trialSubscriptions = organizations.filter(
-    (org) => org.subscriptionStatus === "trial",
+    (org) => org.subscriptionStatus === "trial" && (!org.trialEndsAt || new Date(org.trialEndsAt).getTime() > Date.now()),
+  ).length;
+  const expiredCount = organizations.filter(
+    (org) => org.subscriptionStatus === "expired" || (org.trialEndsAt && new Date(org.trialEndsAt).getTime() <= Date.now() && org.subscriptionStatus !== "revoked"),
   ).length;
   const suspendedCount = organizations.filter(
-    (org) => org.subscriptionStatus === "revoked" || org.subscriptionStatus === "expired",
+    (org) => org.subscriptionStatus === "revoked" || !org.isApproved,
   ).length;
 
   return (
@@ -775,6 +957,10 @@ export default function App() {
                 <div className="stat-label">On trial</div>
               </div>
               <div className="stat-card">
+                <div className="stat-num">{expiredCount}</div>
+                <div className="stat-label">Expired</div>
+              </div>
+              <div className="stat-card">
                 <div className="stat-num">{suspendedCount}</div>
                 <div className="stat-label">Suspended</div>
               </div>
@@ -935,21 +1121,20 @@ export default function App() {
                           </span>
                         </td>
                         <td>
-                          <span
-                            className={`pill ${
-                              org.isApproved && org.subscriptionStatus === "active"
-                                ? "pill-active"
-                                : org.subscriptionStatus === "trial"
-                                ? "pill-trial"
-                                : "pill-suspended"
-                            }`}
-                          >
-                            {org.isApproved && org.subscriptionStatus === "active"
-                              ? "Active"
-                              : org.subscriptionStatus === "trial"
-                              ? "Trial"
-                              : org.subscriptionStatus}
-                          </span>
+                          {(() => {
+                            const isExpired = org.subscriptionStatus === "expired" || (org.trialEndsAt && new Date(org.trialEndsAt).getTime() <= Date.now());
+                            const isRevoked = org.subscriptionStatus === "revoked" || !org.isApproved;
+                            if (isRevoked) {
+                              return <span className="pill pill-suspended">Revoked</span>;
+                            }
+                            if (isExpired) {
+                              return <span className="pill pill-suspended">Expired</span>;
+                            }
+                            if (org.subscriptionStatus === "trial") {
+                              return <span className="pill pill-trial">Trial</span>;
+                            }
+                            return <span className="pill pill-active">Active</span>;
+                          })()}
                         </td>
                         <td>{new Date(org.trialEndsAt).toLocaleDateString()}</td>
                         <td>
@@ -990,37 +1175,45 @@ export default function App() {
                             >
                               <Sparkles size={12} /> Plan
                             </button>
-                            {org.isApproved ? (
-                              <button
-                                className="row-action btn-suspend danger"
-                                disabled={busy === org.id}
-                                title="Suspend organization access"
-                                onClick={() =>
-                                  void runBackendAction(
-                                    org.id,
-                                    () => api.revoke(org.id),
-                                    `Suspended ${org.name}`,
-                                  )
-                                }
-                              >
-                                <Ban size={12} /> Suspend
-                              </button>
-                            ) : (
-                              <button
-                                className="row-action btn-approve"
-                                disabled={busy === org.id}
-                                title="Approve organization"
-                                onClick={() =>
-                                  void runBackendAction(
-                                    org.id,
-                                    () => api.approve(org.id),
-                                    `Approved ${org.name}`,
-                                  )
-                                }
-                              >
-                                <CheckCircle2 size={12} /> Approve
-                              </button>
-                            )}
+                            {(() => {
+                              const isExpired = org.subscriptionStatus === "expired" || (org.trialEndsAt && new Date(org.trialEndsAt).getTime() <= Date.now());
+                              const isRevoked = org.subscriptionStatus === "revoked" || !org.isApproved;
+                              if (!isRevoked && !isExpired) {
+                                return (
+                                  <button
+                                    className="row-action btn-suspend danger"
+                                    disabled={busy === org.id}
+                                    title="Suspend organization access"
+                                    onClick={() =>
+                                      void runBackendAction(
+                                        org.id,
+                                        () => api.revoke(org.id),
+                                        `Suspended ${org.name}`,
+                                      )
+                                    }
+                                  >
+                                    <Ban size={12} /> Suspend
+                                  </button>
+                                );
+                              } else {
+                                return (
+                                  <button
+                                    className="row-action btn-approve"
+                                    disabled={busy === org.id}
+                                    title={isExpired ? "Renew subscription (extends 30 days)" : "Approve organization"}
+                                    onClick={() =>
+                                      void runBackendAction(
+                                        org.id,
+                                        () => api.approve(org.id),
+                                        isExpired ? `Renewed subscription for ${org.name}` : `Approved ${org.name}`,
+                                      )
+                                    }
+                                  >
+                                    <CheckCircle2 size={12} /> {isExpired ? "Renew" : "Approve"}
+                                  </button>
+                                );
+                              }
+                            })()}
                             <button
                               className="row-action danger"
                               disabled={busy === org.id}
@@ -1427,148 +1620,270 @@ export default function App() {
             </div>
           </div>
 
-          {/* 4. PLANS SCREEN */}
+          {/* 4. PLANS & BILLING SCREEN */}
           <div className={`page ${activePage === "plans" ? "active" : ""}`}>
-            <h1 className="page-title">Available Workspace Plans</h1>
-            <p className="page-sub">
-              Compare features and choose the tier that matches your team size and workflow needs.
-            </p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+              <div>
+                <h1 className="page-title">Workspace Plans &amp; Revenue Reports</h1>
+                <p className="page-sub">
+                  Live distribution of organizations, tier feature limits, and revenue generation across plans.
+                </p>
+              </div>
+            </div>
+
+            {/* Plan Distribution Stats Banner */}
+            {(() => {
+              const basicCount = organizations.filter((o) => (o.plan || "Basic").toLowerCase() === "basic" || (o.plan || "").toLowerCase() === "starter").length;
+              const proCount = organizations.filter((o) => (o.plan || "").toLowerCase() === "pro").length;
+              const entCount = organizations.filter((o) => (o.plan || "").toLowerCase() === "enterprise").length;
+              const estMmr = (basicCount * 200) + (proCount * 450) + (entCount * 999);
+
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "24px" }}>
+                  <div className="card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Estimated MRR</span>
+                    <span style={{ fontSize: "24px", fontWeight: 800, color: "var(--ink)" }}>₹{estMmr.toLocaleString("en-IN")}</span>
+                    <span style={{ fontSize: "12px", color: "var(--terracotta)" }}>Monthly subscription run-rate</span>
+                  </div>
+                  <div className="card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Pro Subscribers</span>
+                    <span style={{ fontSize: "24px", fontWeight: 800, color: "var(--ink)" }}>{proCount}</span>
+                    <span style={{ fontSize: "12px", color: "var(--muted)" }}>₹450 /mo per workspace</span>
+                  </div>
+                  <div className="card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Enterprise Tier</span>
+                    <span style={{ fontSize: "24px", fontWeight: 800, color: "var(--ink)" }}>{entCount}</span>
+                    <span style={{ fontSize: "12px", color: "var(--muted)" }}>₹999 /mo per workspace</span>
+                  </div>
+                  <div className="card" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Basic Tier</span>
+                    <span style={{ fontSize: "24px", fontWeight: 800, color: "var(--ink)" }}>{basicCount}</span>
+                    <span style={{ fontSize: "12px", color: "var(--muted)" }}>₹200 /mo per workspace</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="plans-grid">
               {/* Pro Plan Card (Featured) */}
-              <div className="plan-card featured">
-                <span className="badge-featured">Most Popular</span>
-                <h3>Pro Plan</h3>
-                <p className="plan-sub">For growing teams with advanced management features.</p>
-                <div className="plan-price">
-                  ₹450 <span>/mo</span>
-                </div>
-                <hr className="plan-divider" />
-                <div className="plan-features-list">
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Up to 50 team members
+              {(() => {
+                const count = organizations.filter((o) => (o.plan || "").toLowerCase() === "pro").length;
+                return (
+                  <div className="plan-card featured">
+                    <span className="badge-featured">Most Popular</span>
+                    <h3>Pro Plan</h3>
+                    <p className="plan-sub">For growing teams with advanced management features.</p>
+                    <div className="plan-price">
+                      ₹450 <span>/mo</span>
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--terracotta)", marginBottom: "8px" }}>
+                      📊 {count} {count === 1 ? "organization" : "organizations"} currently active
+                    </div>
+                    <hr className="plan-divider" />
+                    <div className="plan-features-list">
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Up to 50 team members
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Unlimited projects
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Screenshot monitoring
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Time tracking
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Departments
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: "100%", height: "36px", borderRadius: "8px", fontWeight: 600, marginTop: "auto", fontSize: "13px" }}
+                      onClick={() => {
+                        setOrgPlanFilter("Pro");
+                        setOrgPage(1);
+                        setActivePage("orgs");
+                        triggerToast(`Filtered organizations on Pro plan (${count} found)`);
+                      }}
+                    >
+                      View {count} Pro {count === 1 ? "Workspace" : "Workspaces"} →
+                    </button>
                   </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Unlimited projects
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Screenshot monitoring
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Time tracking
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Departments
-                  </div>
-                </div>
-                <button
-                  className="btn btn-primary"
-                  style={{ width: "100%", height: "36px", borderRadius: "8px", fontWeight: 600, marginTop: "auto", fontSize: "13px" }}
-                  onClick={() => triggerToast("Pro plan activated")}
-                >
-                  Upgrade / Activate
-                </button>
-              </div>
+                );
+              })()}
 
               {/* Enterprise Plan Card */}
-              <div className="plan-card">
-                <div className="badge-scale">Scale &amp;<br />Custom</div>
-                <h3>Enterprise Plan</h3>
-                <p className="plan-sub">For large organizations requiring custom controls &amp; scale.</p>
-                <div className="plan-price">
-                  ₹330 <span>/mo</span>
-                </div>
-                <hr className="plan-divider" />
-                <div className="plan-features-list">
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Unlimited team members
+              {(() => {
+                const count = organizations.filter((o) => (o.plan || "").toLowerCase() === "enterprise").length;
+                return (
+                  <div className="plan-card">
+                    <div className="badge-scale">Scale &amp;<br />Custom</div>
+                    <h3>Enterprise Plan</h3>
+                    <p className="plan-sub">For large organizations requiring custom controls &amp; scale.</p>
+                    <div className="plan-price">
+                      ₹999 <span>/mo</span>
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink)", marginBottom: "8px" }}>
+                      📊 {count} {count === 1 ? "organization" : "organizations"} currently active
+                    </div>
+                    <hr className="plan-divider" />
+                    <div className="plan-features-list">
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Unlimited team members
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Unlimited projects
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> White Label
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Custom Domain
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> API Access
+                      </div>
+                    </div>
+                    <button
+                      className="btn"
+                      style={{
+                        width: "100%",
+                        height: "36px",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        marginTop: "auto",
+                        background: "var(--paper-2)",
+                        borderColor: "var(--line)",
+                      }}
+                      onClick={() => {
+                        setOrgPlanFilter("Enterprise");
+                        setOrgPage(1);
+                        setActivePage("orgs");
+                        triggerToast(`Filtered organizations on Enterprise plan (${count} found)`);
+                      }}
+                    >
+                      View {count} Enterprise {count === 1 ? "Workspace" : "Workspaces"} →
+                    </button>
                   </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Unlimited projects
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> White Label
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Custom Domain
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> API Access
-                  </div>
-                </div>
-                <button
-                  className="btn"
-                  style={{
-                    width: "100%",
-                    height: "36px",
-                    borderRadius: "8px",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    marginTop: "auto",
-                    background: "var(--paper-2)",
-                    borderColor: "var(--line)",
-                  }}
-                  onClick={() => triggerToast("Enterprise plan selected")}
-                >
-                  Choose Enterprise Plan
-                </button>
-              </div>
+                );
+              })()}
 
               {/* Basic Plan Card */}
-              <div className="plan-card">
-                <h3>Basic Plan</h3>
-                <p className="plan-sub">For small teams getting started with essential task tracking.</p>
-                <div className="plan-price">
-                  ₹200 <span>/mo</span>
-                </div>
-                <hr className="plan-divider" />
-                <div className="plan-features-list">
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Up to 5 team members
+              {(() => {
+                const count = organizations.filter((o) => (o.plan || "Basic").toLowerCase() === "basic" || (o.plan || "").toLowerCase() === "starter").length;
+                return (
+                  <div className="plan-card">
+                    <h3>Basic Plan</h3>
+                    <p className="plan-sub">For small teams getting started with essential task tracking.</p>
+                    <div className="plan-price">
+                      ₹200 <span>/mo</span>
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--muted)", marginBottom: "8px" }}>
+                      📊 {count} {count === 1 ? "organization" : "organizations"} currently active
+                    </div>
+                    <hr className="plan-divider" />
+                    <div className="plan-features-list">
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Up to 5 team members
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Up to 3 projects
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Unlimited tasks
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Kanban Board
+                      </div>
+                      <div className="plan-feat-check">
+                        <CheckCircle2 size={14} /> Basic task management
+                      </div>
+                    </div>
+                    <button
+                      className="btn"
+                      style={{
+                        width: "100%",
+                        height: "36px",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        marginTop: "auto",
+                        background: "var(--paper-2)",
+                        borderColor: "var(--line)",
+                      }}
+                      onClick={() => {
+                        setOrgPlanFilter("Basic");
+                        setOrgPage(1);
+                        setActivePage("orgs");
+                        triggerToast(`Filtered organizations on Basic plan (${count} found)`);
+                      }}
+                    >
+                      View {count} Basic {count === 1 ? "Workspace" : "Workspaces"} →
+                    </button>
                   </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Up to 3 projects
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Unlimited tasks
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Kanban Board
-                  </div>
-                  <div className="plan-feat-check">
-                    <CheckCircle2 size={14} /> Basic task management
-                  </div>
-                </div>
-                <button
-                  className="btn"
-                  style={{
-                    width: "100%",
-                    height: "36px",
-                    borderRadius: "8px",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    marginTop: "auto",
-                    background: "var(--paper-2)",
-                    borderColor: "var(--line)",
-                  }}
-                  onClick={() => triggerToast("Basic plan selected")}
-                >
-                  Choose Basic Plan
-                </button>
-              </div>
+                );
+              })()}
             </div>
 
-            <div className="panel-head">
-              <h2>Recent Invoices</h2>
+            <div className="panel-head" style={{ marginTop: "32px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h2>Recent Invoices &amp; Receipts</h2>
+              <button
+                className="btn btn-primary"
+                style={{ height: "34px", fontSize: "12.5px", borderRadius: "6px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                onClick={() => {
+                  if (organizations.length > 0) setNewInvoiceOrgId(organizations[0].id);
+                  setIsAddInvoiceModalOpen(true);
+                }}
+              >
+                + Record Invoice
+              </button>
             </div>
             {invoices.length > 0 ? (
-              <div className="card" style={{ padding: "2px 12px" }}>
-                {invoices.map((inv, idx) => (
-                  <div className="log-row" key={idx}>
-                    <span>{inv.orgName} — {inv.plan}</span>
-                    <span className="t mono">{inv.amount} · {inv.date}</span>
-                  </div>
-                ))}
+              <div className="card" style={{ padding: "8px 16px" }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Organization</th>
+                      <th>Plan</th>
+                      <th>Amount</th>
+                      <th>Date</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoices.map((inv, idx) => (
+                      <tr key={inv.id || idx}>
+                        <td className="mono" style={{ fontWeight: 600 }}>{inv.invoiceNumber || `INV-${idx + 1}`}</td>
+                        <td style={{ fontWeight: 500 }}>{inv.orgName}</td>
+                        <td><span className="tier-badge" style={{ margin: 0 }}>{inv.plan}</span></td>
+                        <td className="mono">{inv.amount}</td>
+                        <td style={{ fontSize: "12px", color: "var(--muted)" }}>{inv.date}</td>
+                        <td>
+                          <span className={`pill ${inv.status.toLowerCase() === "paid" ? "pill-active" : "pill-suspended"}`}>
+                            {inv.status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td>
+                          {inv.id && (
+                            <a
+                              href={api.getInvoicePdfUrl(inv.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="row-action"
+                              style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <FileText size={12} /> Print PDF
+                            </a>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : (
               <div className="empty-invoices-card">
@@ -1598,11 +1913,17 @@ export default function App() {
                     </div>
                     <button
                       className={`switch ${f.enabled ? "on" : ""}`}
-                      onClick={() => {
-                        setFeatureFlags((prev) =>
-                          prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: !flag.enabled } : flag)),
-                        );
-                        triggerToast(`${f.label} flag toggled`);
+                      onClick={async () => {
+                        const nextVal = !f.enabled;
+                        try {
+                          await api.toggleFlag(f.id, nextVal);
+                          setFeatureFlags((prev) =>
+                            prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: nextVal } : flag)),
+                          );
+                          triggerToast(`${f.label} flag ${nextVal ? "enabled" : "disabled"}`);
+                        } catch (err) {
+                          triggerToast(apiErrorMessage(err, "Failed to toggle flag"));
+                        }
                       }}
                     >
                       <div className="knob"></div>
@@ -1620,11 +1941,17 @@ export default function App() {
                     </div>
                     <button
                       className={`switch ${f.enabled ? "on" : ""}`}
-                      onClick={() => {
-                        setFeatureFlags((prev) =>
-                          prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: !flag.enabled } : flag)),
-                        );
-                        triggerToast(`${f.label} flag toggled`);
+                      onClick={async () => {
+                        const nextVal = !f.enabled;
+                        try {
+                          await api.toggleFlag(f.id, nextVal);
+                          setFeatureFlags((prev) =>
+                            prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: nextVal } : flag)),
+                          );
+                          triggerToast(`${f.label} flag ${nextVal ? "enabled" : "disabled"}`);
+                        } catch (err) {
+                          triggerToast(apiErrorMessage(err, "Failed to toggle flag"));
+                        }
                       }}
                     >
                       <div className="knob"></div>
@@ -1773,7 +2100,7 @@ export default function App() {
             )}
           </div>
 
-          {/* 7. SECURITY SCREEN (Mock client side) */}
+          {/* 7. SECURITY SCREEN (Connected to Backend API) */}
           <div className={`page ${activePage === "security" ? "active" : ""}`}>
             <h1 className="page-title">Security</h1>
             <p className="page-sub">Platform-wide authentication and access policies.</p>
@@ -1787,11 +2114,17 @@ export default function App() {
                   </div>
                   <button
                     className={`switch ${sec.enabled ? "on" : ""}`}
-                    onClick={() => {
-                      setSecurityFlags((prev) =>
-                        prev.map((s) => (s.id === sec.id ? { ...s, enabled: !s.enabled } : s)),
-                      );
-                      triggerToast(`${sec.label} policy updated`);
+                    onClick={async () => {
+                      const nextVal = !sec.enabled;
+                      try {
+                        await api.toggleSecurity(sec.id, nextVal);
+                        setSecurityFlags((prev) =>
+                          prev.map((s) => (s.id === sec.id ? { ...s, enabled: nextVal } : s)),
+                        );
+                        triggerToast(`${sec.label} policy ${nextVal ? "activated" : "deactivated"}`);
+                      } catch (err) {
+                        triggerToast(apiErrorMessage(err, "Failed to update security policy"));
+                      }
                     }}
                   >
                     <div className="knob"></div>
@@ -1801,27 +2134,111 @@ export default function App() {
             </div>
           </div>
 
-          {/* 8. SUPPORT SCREEN (Mock client side) */}
+          {/* 8. SUPPORT SCREEN (Connected to Backend API) */}
           <div className={`page ${activePage === "support" ? "active" : ""}`}>
-            <h1 className="page-title">Support</h1>
-            <p className="page-sub">Open tickets and org impersonation for troubleshooting.</p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+              <div>
+                <h1 className="page-title">Support &amp; Helpdesk</h1>
+                <p className="page-sub">Client issue tickets, 1-click workspace impersonation, and live threaded resolution.</p>
+              </div>
+              <button
+                className="btn btn-primary"
+                style={{ height: "34px", fontSize: "12.5px", borderRadius: "6px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
+                onClick={() => {
+                  if (organizations.length > 0) setNewTicketOrgId(organizations[0].id);
+                  setIsCreateTicketModalOpen(true);
+                }}
+              >
+                + Open Ticket
+              </button>
+            </div>
 
             <div className="panel-head">
-              <h2>Open tickets</h2>
+              <h2>Active Support Queue ({filteredTickets.length})</h2>
             </div>
-            <div className="card" style={{ padding: "2px 12px" }}>
-              {filteredTickets.map((t) => (
-                <div className="ticket-row" key={t.id}>
-                  <span>
-                    {t.title}
-                    <div className="ticket-org">{t.orgName} · Opened {t.openedAt}</div>
-                  </span>
-                  <button className="btn btn-sm" onClick={() => triggerToast(`Opening ticket #${t.id}...`)}>
-                    Open
-                  </button>
+            {filteredTickets.length > 0 ? (
+              <div className="card" style={{ padding: "8px 16px" }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Ticket #</th>
+                      <th>Subject / Issue</th>
+                      <th>Workspace</th>
+                      <th>Priority</th>
+                      <th>Status</th>
+                      <th>Opened</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTickets.map((t) => {
+                      const isClosed = t.status === "closed" || t.status === "resolved";
+                      return (
+                        <tr key={t.id}>
+                          <td className="mono" style={{ fontWeight: 600 }}>{t.ticketNumber || `TICK-${t.id.slice(0, 4)}`}</td>
+                          <td>
+                            <span
+                              className="clickable-row-name"
+                              style={{ fontWeight: 600, color: "var(--ink)", display: "block" }}
+                              onClick={() => handleOpenTicketDrawer(t)}
+                            >
+                              {t.title}
+                            </span>
+                            {t.description && (
+                              <span style={{ fontSize: "12px", color: "var(--muted)", display: "block", marginTop: "2px", maxWidth: "340px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {t.description}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ fontWeight: 500 }}>{t.orgName || "Workspace"}</td>
+                          <td>
+                            <span style={{
+                              display: "inline-block",
+                              padding: "2px 8px",
+                              borderRadius: "4px",
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                              background: t.priority === "urgent" ? "#fee2e2" : t.priority === "high" ? "#ffedd5" : "var(--paper-2)",
+                              color: t.priority === "urgent" ? "#991b1b" : t.priority === "high" ? "#9a3412" : "var(--muted)"
+                            }}>
+                              {t.priority || "medium"}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`pill ${isClosed ? "pill-active" : "pill-suspended"}`}>
+                              {(t.status || "open").toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: "12px", color: "var(--muted)" }}>
+                            {t.openedAt ? new Date(t.openedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "Recently"}
+                          </td>
+                          <td>
+                            <button
+                              className="row-action"
+                              style={{ fontWeight: 600, color: "var(--terracotta)" }}
+                              onClick={() => handleOpenTicketDrawer(t)}
+                            >
+                              View &amp; Reply →
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-invoices-card">
+                <div className="empty-invoices-icon">
+                  <Shield size={20} />
                 </div>
-              ))}
-            </div>
+                <div className="empty-invoices-title">No active support tickets</div>
+                <div className="empty-invoices-sub">
+                  Customer help requests and escalated issues will automatically appear here.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 9. SETTINGS SCREEN (Mock client side) */}
@@ -1879,7 +2296,21 @@ export default function App() {
                   <option>PST — America/Los_Angeles</option>
                 </select>
               </div>
-              <button className="btn btn-primary" onClick={() => triggerToast("Platform settings saved")}>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  try {
+                    await api.updateSettings({
+                      platformName,
+                      supportEmail,
+                      defaultTimezone,
+                    });
+                    triggerToast("Platform settings saved successfully");
+                  } catch (err) {
+                    triggerToast(apiErrorMessage(err, "Failed to save settings"));
+                  }
+                }}
+              >
                 Save changes
               </button>
             </div>
@@ -1887,24 +2318,75 @@ export default function App() {
             {/* API Tab */}
             <div className={`settings-panel ${settingsTab === "api" ? "active" : ""}`}>
               <div className="key-row">
-                <span>pk_live_51H8x••••••••••••••••e93A</span>
-                <button className="btn btn-sm" onClick={() => triggerToast("API Key copied to clipboard")}>
+                <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+                  {apiKey.length > 20 ? `${apiKey.slice(0, 10)}••••••••••••••••${apiKey.slice(-4)}` : apiKey}
+                </span>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(apiKey);
+                    triggerToast("API Key copied to clipboard");
+                  }}
+                >
                   Copy
                 </button>
-                <button className="btn btn-sm btn-danger" onClick={() => triggerToast("Key revoked")}>
+                <button
+                  className="btn btn-sm btn-danger"
+                  onClick={async () => {
+                    try {
+                      const res = await api.revokeKey("api_key");
+                      if (res.apiKey) setApiKey(res.apiKey);
+                      triggerToast("API Key revoked and new key generated");
+                    } catch (err) {
+                      triggerToast(apiErrorMessage(err, "Failed to revoke key"));
+                    }
+                  }}
+                >
                   Revoke
                 </button>
               </div>
               <div className="key-row">
-                <span>whsec_9F2b••••••••••••••••c71Z</span>
-                <button className="btn btn-sm" onClick={() => triggerToast("Webhook secret copied to clipboard")}>
+                <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+                  {webhookSecret.length > 20
+                    ? `${webhookSecret.slice(0, 10)}••••••••••••••••${webhookSecret.slice(-4)}`
+                    : webhookSecret}
+                </span>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(webhookSecret);
+                    triggerToast("Webhook secret copied to clipboard");
+                  }}
+                >
                   Copy
                 </button>
-                <button className="btn btn-sm btn-danger" onClick={() => triggerToast("Webhook secret revoked")}>
+                <button
+                  className="btn btn-sm btn-danger"
+                  onClick={async () => {
+                    try {
+                      const res = await api.revokeKey("webhook");
+                      if (res.webhookSecret) setWebhookSecret(res.webhookSecret);
+                      triggerToast("Webhook secret revoked and rotated");
+                    } catch (err) {
+                      triggerToast(apiErrorMessage(err, "Failed to revoke webhook secret"));
+                    }
+                  }}
+                >
                   Revoke
                 </button>
               </div>
-              <button className="btn btn-primary" onClick={() => triggerToast("New API key generated")}>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  try {
+                    const res = await api.generateApiKey();
+                    if (res.apiKey) setApiKey(res.apiKey);
+                    triggerToast("New API key generated successfully");
+                  } catch (err) {
+                    triggerToast(apiErrorMessage(err, "Failed to generate key"));
+                  }
+                }}
+              >
                 Generate new key
               </button>
             </div>
@@ -1940,7 +2422,17 @@ export default function App() {
                   />
                 </div>
               </div>
-              <button className="btn btn-primary" onClick={() => triggerToast("Default branding saved")}>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  try {
+                    await api.updateSettings({ accentColor });
+                    triggerToast("Default branding saved successfully");
+                  } catch (err) {
+                    triggerToast(apiErrorMessage(err, "Failed to save branding"));
+                  }
+                }}
+              >
                 Save changes
               </button>
             </div>
@@ -2368,6 +2860,166 @@ export default function App() {
         </div>
       </div>
 
+      {/* 5. ADD INVOICE MODAL */}
+      <div
+        className={`overlay ${isAddInvoiceModalOpen ? "open" : ""}`}
+        onClick={() => setIsAddInvoiceModalOpen(false)}
+      >
+        <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "460px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "19px", color: "var(--ink)", fontWeight: 700 }}>Record New Invoice</h3>
+              <p className="sub" style={{ margin: "3px 0 0", fontSize: "12.5px", color: "var(--muted)" }}>
+                Create and store a billing transaction receipt for a workspace
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAddInvoiceModalOpen(false)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--muted)",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "4px",
+              }}
+              title="Close modal"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <form onSubmit={handleCreateInvoice}>
+            <div className="field" style={{ marginBottom: "14px" }}>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                Target Workspace *
+              </label>
+              <select
+                required
+                value={newInvoiceOrgId}
+                onChange={(e) => setNewInvoiceOrgId(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  fontSize: "13.5px",
+                  outline: "none",
+                }}
+              >
+                {organizations.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name} ({o.plan || "Pro"})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="row2" style={{ marginBottom: "14px" }}>
+              <div className="field">
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                  Plan Tier *
+                </label>
+                <select
+                  value={newInvoicePlan}
+                  onChange={(e) => {
+                    const plan = e.target.value;
+                    setNewInvoicePlan(plan);
+                    if (plan === "Basic") setNewInvoiceAmount("₹200 /mo");
+                    else if (plan === "Pro") setNewInvoiceAmount("₹450 /mo");
+                    else if (plan === "Enterprise") setNewInvoiceAmount("₹999 /mo");
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    fontSize: "13px",
+                    outline: "none",
+                  }}
+                >
+                  <option value="Basic">Basic (₹200)</option>
+                  <option value="Pro">Pro (₹450)</option>
+                  <option value="Enterprise">Enterprise (₹999)</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                  Payment Status *
+                </label>
+                <select
+                  value={newInvoiceStatus}
+                  onChange={(e) => setNewInvoiceStatus(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    fontSize: "13px",
+                    outline: "none",
+                  }}
+                >
+                  <option value="paid">Paid</option>
+                  <option value="pending">Pending</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="field" style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                Billed Amount *
+              </label>
+              <input
+                type="text"
+                required
+                value={newInvoiceAmount}
+                onChange={(e) => setNewInvoiceAmount(e.target.value)}
+                placeholder="e.g. ₹450 /mo"
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  fontSize: "13.5px",
+                  outline: "none",
+                }}
+              />
+            </div>
+
+            <div className="modal-foot">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setIsAddInvoiceModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={busy === "create-invoice"}
+              >
+                {busy === "create-invoice" ? "Recording…" : "Create & Record Invoice"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       {/* 5. QUICK VIEW SLIDE-OVER DRAWER */}
       <div
         className={`drawer-overlay ${drawerItem ? "open" : ""}`}
@@ -2401,21 +3053,20 @@ export default function App() {
                   <div className="drawer-field">
                     <div className="label">Subscription Status</div>
                     <div className="val">
-                      <span
-                        className={`pill ${
-                          drawerItem.data.isApproved && drawerItem.data.subscriptionStatus === "active"
-                            ? "pill-active"
-                            : drawerItem.data.subscriptionStatus === "trial"
-                            ? "pill-trial"
-                            : "pill-suspended"
-                        }`}
-                      >
-                        {drawerItem.data.isApproved && drawerItem.data.subscriptionStatus === "active"
-                          ? "Active"
-                          : drawerItem.data.subscriptionStatus === "trial"
-                          ? "Trial"
-                          : drawerItem.data.subscriptionStatus}
-                      </span>
+                      {(() => {
+                        const isExpired = drawerItem.data.subscriptionStatus === "expired" || (drawerItem.data.trialEndsAt && new Date(drawerItem.data.trialEndsAt).getTime() <= Date.now());
+                        const isRevoked = drawerItem.data.subscriptionStatus === "revoked" || !drawerItem.data.isApproved;
+                        if (isRevoked) {
+                          return <span className="pill pill-suspended">Revoked</span>;
+                        }
+                        if (isExpired) {
+                          return <span className="pill pill-suspended">Expired</span>;
+                        }
+                        if (drawerItem.data.subscriptionStatus === "trial") {
+                          return <span className="pill pill-trial">Trial</span>;
+                        }
+                        return <span className="pill pill-active">Active</span>;
+                      })()}
                     </div>
                   </div>
 
@@ -2774,6 +3425,326 @@ export default function App() {
           </form>
         </div>
       </div>
+      {/* 7. CREATE TICKET MODAL */}
+      <div
+        className={`overlay ${isCreateTicketModalOpen ? "open" : ""}`}
+        onClick={() => setIsCreateTicketModalOpen(false)}
+      >
+        <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "480px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "19px", color: "var(--ink)", fontWeight: 700 }}>Open Support Ticket</h3>
+              <p className="sub" style={{ margin: "3px 0 0", fontSize: "12.5px", color: "var(--muted)" }}>
+                Log a new support or troubleshooting ticket for a client
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsCreateTicketModalOpen(false)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--muted)",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "4px",
+              }}
+              title="Close modal"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <form onSubmit={handleCreateTicket}>
+            <div className="field" style={{ marginBottom: "14px" }}>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                Target Workspace *
+              </label>
+              <select
+                required
+                value={newTicketOrgId}
+                onChange={(e) => setNewTicketOrgId(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  fontSize: "13.5px",
+                  outline: "none",
+                }}
+              >
+                {organizations.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field" style={{ marginBottom: "14px" }}>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                Ticket Subject / Issue Title *
+              </label>
+              <input
+                type="text"
+                required
+                value={newTicketTitle}
+                onChange={(e) => setNewTicketTitle(e.target.value)}
+                placeholder="e.g. Domain setup assistance or CSV import error"
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  fontSize: "13.5px",
+                  outline: "none",
+                }}
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: "14px" }}>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                Priority Level *
+              </label>
+              <select
+                value={newTicketPriority}
+                onChange={(e) => setNewTicketPriority(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  fontSize: "13px",
+                  outline: "none",
+                }}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+
+            <div className="field" style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: "6px" }}>
+                Issue Description
+              </label>
+              <textarea
+                rows={3}
+                value={newTicketDesc}
+                onChange={(e) => setNewTicketDesc(e.target.value)}
+                placeholder="Optional details about the client's request or technical error..."
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  fontSize: "13px",
+                  outline: "none",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+
+            <div className="modal-foot">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setIsCreateTicketModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={busy === "create-ticket"}
+              >
+                {busy === "create-ticket" ? "Opening…" : "Open Support Ticket"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* 8. TICKET CONVERSATION THREAD SLIDE-OVER DRAWER */}
+      <div
+        className={`drawer-overlay ${activeTicket ? "open" : ""}`}
+        onClick={() => setActiveTicket(null)}
+      />
+      <div className={`drawer-panel ${activeTicket ? "open" : ""}`} style={{ maxWidth: "520px" }}>
+        {activeTicket && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+            <div className="drawer-header" style={{ paddingBottom: "16px", borderBottom: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                  <span className="mono" style={{ fontSize: "12px", fontWeight: 700, color: "var(--terracotta)" }}>
+                    #{activeTicket.ticketNumber || activeTicket.id.slice(0, 8)}
+                  </span>
+                  <span style={{
+                    fontSize: "10.5px",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    background: activeTicket.priority === "urgent" ? "#fee2e2" : activeTicket.priority === "high" ? "#ffedd5" : "var(--paper-2)",
+                    color: activeTicket.priority === "urgent" ? "#991b1b" : activeTicket.priority === "high" ? "#9a3412" : "var(--muted)",
+                  }}>
+                    {activeTicket.priority}
+                  </span>
+                </div>
+                <h3 style={{ margin: "2px 0 0", fontSize: "16px", fontWeight: 700, color: "var(--ink)" }}>
+                  {activeTicket.title}
+                </h3>
+                <span style={{ fontSize: "12.5px", color: "var(--muted)" }}>
+                  {activeTicket.orgName} · Opened {activeTicket.openedAt ? new Date(activeTicket.openedAt).toLocaleDateString() : "Recently"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTicket(null)}
+                style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: "4px" }}
+                title="Close ticket drawer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Quick Status Bar & Actions */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: "var(--muted)", fontWeight: 600 }}>Status:</span>
+                <select
+                  value={activeTicket.status || "open"}
+                  onChange={(e) => handleUpdateTicketStatus(e.target.value)}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--ink)",
+                    outline: "none",
+                  }}
+                >
+                  <option value="open">OPEN</option>
+                  <option value="in_progress">IN PROGRESS</option>
+                  <option value="resolved">RESOLVED</option>
+                  <option value="closed">CLOSED</option>
+                </select>
+              </div>
+
+              {activeTicket.organizationId && (
+                <button
+                  className="row-action"
+                  style={{ fontSize: "12px", padding: "4px 8px", color: "var(--terracotta)", fontWeight: 600 }}
+                  onClick={async () => {
+                    triggerToast(`Impersonating workspace...`);
+                    try {
+                      const res = await api.impersonate(activeTicket.organizationId!);
+                      triggerToast(`Workspace opened in new tab!`);
+                      window.open(res.redirectUrl || "http://localhost:8001", "_blank");
+                    } catch (error) {
+                      triggerToast(apiErrorMessage(error, "Impersonation failed."));
+                    }
+                  }}
+                >
+                  <Eye size={12} /> Impersonate Workspace
+                </button>
+              )}
+            </div>
+
+            {/* Ticket Description */}
+            {activeTicket.description && (
+              <div style={{ padding: "12px", background: "var(--paper-2)", borderRadius: "8px", margin: "14px 0 6px", fontSize: "13px", color: "var(--ink)" }}>
+                <strong>Issue Details:</strong> {activeTicket.description}
+              </div>
+            )}
+
+            {/* Conversation Thread History */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "12px 0", display: "flex", flexDirection: "column", gap: "12px" }}>
+              <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: 700, color: "var(--muted)", letterSpacing: "0.05em" }}>
+                Conversation History ({ticketRepliesList.length})
+              </span>
+
+              {ticketRepliesList.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "24px 0", color: "var(--muted)", fontSize: "12.5px" }}>
+                  No messages yet. Send a reply below to start the thread.
+                </div>
+              ) : (
+                ticketRepliesList.map((rep) => (
+                  <div
+                    key={rep.id}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: "8px",
+                      background: rep.senderRole === "Super Admin" ? "var(--terracotta-dim)" : "var(--paper-2)",
+                      border: rep.senderRole === "Super Admin" ? "1px solid var(--terracotta)" : "1px solid var(--line)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink)" }}>
+                        {rep.senderName} <span style={{ fontWeight: 500, color: "var(--muted)" }}>({rep.senderRole || "Support"})</span>
+                      </span>
+                      <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                        {rep.createdAt ? new Date(rep.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Just now"}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: "13px", color: "var(--ink)", whiteSpace: "pre-wrap" }}>
+                      {rep.message}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Reply Input Box */}
+            <form onSubmit={handleSendTicketReply} style={{ marginTop: "auto", paddingTop: "12px", borderTop: "1px solid var(--line)" }}>
+              <textarea
+                rows={3}
+                required
+                value={newTicketReplyText}
+                onChange={(e) => setNewTicketReplyText(e.target.value)}
+                placeholder="Type your response to the client..."
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  fontSize: "13px",
+                  outline: "none",
+                  resize: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={busy === "ticket-reply"}
+                  style={{ height: "34px", padding: "0 16px", fontSize: "13px", fontWeight: 600 }}
+                >
+                  {busy === "ticket-reply" ? "Sending…" : "Send Reply"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
+
       <div className={`toast ${showToast ? "show" : ""}`}>
         <span className="dot" />
         <span>{toastMsg}</span>
