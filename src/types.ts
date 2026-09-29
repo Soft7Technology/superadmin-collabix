@@ -43,4 +43,59 @@ export interface SystemLog {
   timestamp: string;
 }
 
+export interface FeatureFlag {
+  id: string;
+  label: string;
+  sub: string;
+  enabled: boolean;
+}
+
+export interface SecurityPolicy {
+  id: string;
+  label: string;
+  sub: string;
+  enabled: boolean;
+}
+
+export interface PlatformSettings {
+  platformName: string;
+  supportEmail: string;
+  defaultTimezone: string;
+  accentColor: string;
+  apiKey: string;
+  webhookSecret: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  ticketNumber?: string;
+  title: string;
+  description?: string;
+  orgName?: string;
+  organizationId?: string;
+  status?: string;
+  priority?: string;
+  openedAt: string;
+}
+
+export interface Invoice {
+  id?: string;
+  invoiceNumber?: string;
+  orgName: string;
+  organizationId?: string;
+  plan: string;
+  amount: string;
+  date: string;
+  status: string;
+}
+
+export interface TicketReply {
+  id: string;
+  ticketId: string;
+  senderId?: string | null;
+  senderName: string;
+  senderRole?: string;
+  message: string;
+  createdAt: string;
+}
 
