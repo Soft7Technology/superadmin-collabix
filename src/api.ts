@@ -26,6 +26,7 @@ const readCookie = (name: string) => {
 
 const http = axios.create({
   baseURL: origin,
+  timeout: 8000,
   withCredentials: true,
   headers: { "Content-Type": "application/json" },
 });

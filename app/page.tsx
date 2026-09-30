@@ -24,9 +24,12 @@ import {
   EyeOff,
   FileText,
   Filter,
+  Flag,
   HardDrive,
   LogOut,
+  Menu,
   Pencil,
+  Printer,
   RefreshCw,
   Search,
   Server,
@@ -70,9 +73,11 @@ export default function App() {
   // Live Backend Data
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Navigation & Search
   const [activePage, setActivePage] = useState<PageKey>("overview");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   
   // Toast & Modals
@@ -81,6 +86,7 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [orgToDelete, setOrgToDelete] = useState<Organization | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
   const [planModalOrg, setPlanModalOrg] = useState<{ id: string; name: string; currentPlan: string } | null>(null);
   const [selectedPlanTier, setSelectedPlanTier] = useState<"Basic" | "Pro" | "Enterprise">("Pro");
@@ -179,15 +185,23 @@ export default function App() {
     { id: "api", label: "API access", sub: "Public API and webhooks", enabled: true },
   ]);
 
-  const [securityFlags, setSecurityFlags] = useState([
+  const [securityFlags, setSecurityFlags] = useState<SecurityPolicy[]>([
     { id: "2fa", label: "Enforce 2FA for all org admins", sub: "Applies across every organization", enabled: true },
     { id: "sso", label: "Require SSO for Enterprise plan", sub: "Google Workspace / Okta / Azure AD", enabled: false },
     { id: "ip", label: "IP allow-listing", sub: "Restrict platform admin console by IP", enabled: false },
     { id: "auto", label: "Auto-suspend on repeated breach attempts", sub: "Lock org after 5 failed admin logins", enabled: true },
+    { id: "maint", label: "System Maintenance Mode", sub: "Block all non-superadmin traffic and customer logins", enabled: false },
   ]);
+
+  // Computed state for active platform maintenance mode
+  const isMaintenanceActive = useMemo(
+    () => securityFlags.some((s) => (s.id === "maint" || s.id === "maintenance") && s.enabled),
+    [securityFlags],
+  );
 
   // Support tickets — loaded from backend
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [ticketStatusFilter, setTicketStatusFilter] = useState<"all" | "open" | "in_progress" | "resolved" | "closed">("all");
   const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
   const [ticketRepliesList, setTicketRepliesList] = useState<TicketReply[]>([]);
   const [newTicketReplyText, setNewTicketReplyText] = useState("");
@@ -213,7 +227,7 @@ export default function App() {
   const [platformName, setPlatformName] = useState("SOFT7");
   const [supportEmail, setSupportEmail] = useState("support@soft7.in");
   const [defaultTimezone, setDefaultTimezone] = useState("IST — Asia/Kolkata");
-  const [accentColor, setAccentColor] = useState("#3cdb73");
+  const [accentColor, setAccentColor] = useState("#D96B43");
   const [apiKey, setApiKey] = useState("pk_live_51H8x••••••••••••••••e93A");
   const [webhookSecret, setWebhookSecret] = useState("whsec_9F2b••••••••••••••••c71Z");
 
@@ -392,16 +406,25 @@ export default function App() {
   };
 
   useEffect(() => {
+    let active = true;
+    const failsafe = setTimeout(() => {
+      if (active) {
+        setSession((prev) => (prev === "loading" ? "guest" : prev));
+      }
+    }, 2500);
+
     api
       .session()
       .then(async (currentUser) => {
-        if (!currentUser.isSuperAdmin) {
+        if (!active) return;
+        clearTimeout(failsafe);
+        if (!currentUser || !currentUser.isSuperAdmin) {
           setSession("forbidden");
           return;
         }
         setUser(currentUser);
         setSession("authenticated");
-        await Promise.all([
+        void Promise.all([
           loadOrganizations(),
           loadUsers(),
           loadLogs(),
@@ -412,8 +435,52 @@ export default function App() {
           loadInvoices(),
         ]);
       })
-      .catch(() => setSession("guest"));
+      .catch(() => {
+        if (active) {
+          clearTimeout(failsafe);
+          setSession("guest");
+        }
+      });
+
+    return () => {
+      active = false;
+      clearTimeout(failsafe);
+    };
   }, [
+    loadOrganizations,
+    loadUsers,
+    loadLogs,
+    loadFlags,
+    loadSecurity,
+    loadSettings,
+    loadTickets,
+    loadInvoices,
+  ]);
+
+  // Global Refresh Handler with Throttle / Debounce
+  const handleRefreshAll = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        loadOrganizations(),
+        loadUsers(),
+        loadLogs(),
+        loadFlags(),
+        loadSecurity(),
+        loadSettings(),
+        loadTickets(),
+        loadInvoices(),
+        new Promise((resolve) => setTimeout(resolve, 600)),
+      ]);
+      triggerToast("All platform data refreshed.");
+    } catch (err) {
+      triggerToast(apiErrorMessage(err, "Failed to refresh platform data."));
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [
+    isRefreshing,
     loadOrganizations,
     loadUsers,
     loadLogs,
@@ -443,6 +510,32 @@ export default function App() {
     }, 2400);
   };
 
+  // Dynamic contextual search placeholder across all tabs
+  const searchPlaceholder = useMemo(() => {
+    switch (activePage) {
+      case "overview":
+        return "Search platform overview & activity...";
+      case "orgs":
+        return "Search organizations by name, owner, email, ID...";
+      case "users":
+        return "Search users by name, email, role, department...";
+      case "plans":
+        return "Search billing, plans & invoices by org, amount...";
+      case "flags":
+        return "Search feature flags...";
+      case "logs":
+        return "Search audit logs & system events...";
+      case "security":
+        return "Search security policies...";
+      case "support":
+        return "Search tickets by title, workspace, ticket #...";
+      case "settings":
+        return "Search platform settings...";
+      default:
+        return "Search platform...";
+    }
+  }, [activePage]);
+
   // Run backend action helper
   const runBackendAction = async (
     id: string,
@@ -460,6 +553,19 @@ export default function App() {
       setBusy(null);
     }
   };
+
+  // Filtered recent activity for Overview screen
+  const filteredRecentOrgs = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return organizations.slice(0, 5);
+    return organizations
+      .filter((org) =>
+        [org.name, org.ownerEmail, org.ownerName, org.id, org.phone]
+          .filter(Boolean)
+          .some((val) => val!.toLowerCase().includes(term)),
+      )
+      .slice(0, 5);
+  }, [organizations, searchQuery]);
 
   // Filtering live Organizations (with Multi-filter & Sort)
   const processedOrgs = useMemo(() => {
@@ -531,16 +637,50 @@ export default function App() {
     return processedUsers.slice(start, start + userPageSize);
   }, [processedUsers, userPage, userPageSize]);
 
-  // Search filtering support tickets
-  const filteredTickets = useMemo(() => {
+  // Search filtering invoices
+  const filteredInvoices = useMemo(() => {
     const term = searchQuery.trim().toLowerCase();
-    if (!term) return supportTickets;
-    return supportTickets.filter((t) =>
-      [t.title, t.orgName, t.description, t.ticketNumber]
+    if (!term) return invoices;
+    return invoices.filter((inv) =>
+      [inv.invoiceNumber, inv.orgName, inv.plan, inv.amount, inv.status, inv.date]
         .filter(Boolean)
         .some((val) => val!.toLowerCase().includes(term)),
     );
-  }, [supportTickets, searchQuery]);
+  }, [invoices, searchQuery]);
+
+  // Search filtering feature flags
+  const filteredFlags = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return featureFlags;
+    return featureFlags.filter((f) =>
+      f.label.toLowerCase().includes(term) || f.sub.toLowerCase().includes(term),
+    );
+  }, [featureFlags, searchQuery]);
+
+  // Search filtering security policies
+  const filteredSecurity = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return securityFlags;
+    return securityFlags.filter((s) =>
+      s.label.toLowerCase().includes(term) || s.sub.toLowerCase().includes(term),
+    );
+  }, [securityFlags, searchQuery]);
+
+  // Search and status filtering support tickets
+  const filteredTickets = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    return supportTickets.filter((t) => {
+      const status = (t.status || "open").toLowerCase();
+      const matchesStatus =
+        ticketStatusFilter === "all" || status === ticketStatusFilter;
+      const matchesSearch =
+        !term ||
+        [t.title, t.orgName, t.description, t.ticketNumber, t.priority, t.status]
+          .filter(Boolean)
+          .some((val) => val!.toLowerCase().includes(term));
+      return matchesStatus && matchesSearch;
+    });
+  }, [supportTickets, searchQuery, ticketStatusFilter]);
 
   // Search and category filtering system logs
   const filteredLogs = useMemo(() => {
@@ -557,6 +697,19 @@ export default function App() {
     const start = (logsPage - 1) * logsPageSize;
     return filteredLogs.slice(start, start + logsPageSize);
   }, [filteredLogs, logsPage, logsPageSize]);
+
+  // Auto-clamp pagination pages when total pages decrease
+  useEffect(() => {
+    if (orgPage > totalOrgPages) setOrgPage(totalOrgPages);
+  }, [orgPage, totalOrgPages]);
+
+  useEffect(() => {
+    if (userPage > totalUserPages) setUserPage(totalUserPages);
+  }, [userPage, totalUserPages]);
+
+  useEffect(() => {
+    if (logsPage > totalLogPages) setLogsPage(totalLogPages);
+  }, [logsPage, totalLogPages]);
 
   // Create new organization handler — calls backend API
   const handleCreateOrg = async () => {
@@ -704,8 +857,14 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* MOBILE SIDEBAR OVERLAY BACKDROP */}
+      <div
+        className={`mobile-sidebar-overlay ${mobileSidebarOpen ? "open" : ""}`}
+        onClick={() => setMobileSidebarOpen(false)}
+      />
+
       {/* SIDEBAR NAVIGATION */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${mobileSidebarOpen ? "mobile-open" : ""}`}>
         <div className="brand">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -713,17 +872,17 @@ export default function App() {
             style={{ width: "30px", height: "30px", flexShrink: 0 }}
             fill="none"
           >
-            {/* Laptop Base / Chassis in Green */}
+            {/* Laptop Base / Chassis in Terracotta */}
             <path
               d="M2 23.5h28v1.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1.5z"
-              fill="#3cdb73"
+              fill="#D96B43"
             />
             {/* Trackpad notch */}
             <path
               d="M12 23.5h8V24a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-.5z"
-              fill="#1fa652"
+              fill="#C45A32"
             />
-            {/* Laptop Screen frame in Green */}
+            {/* Laptop Screen frame in Terracotta */}
             <rect
               x="4"
               y="7"
@@ -731,7 +890,7 @@ export default function App() {
               height="16.5"
               rx="2"
               fill="none"
-              stroke="#3cdb73"
+              stroke="#D96B43"
               strokeWidth="2.5"
             />
             {/* Laptop Screen inside (dark/translucent area) */}
@@ -740,16 +899,16 @@ export default function App() {
               y="8.5"
               width="21"
               height="13.5"
-              fill="#1f2937"
+              fill="#2D2520"
               rx="0.5"
-              opacity="0.05"
+              opacity="0.06"
             />
 
-            {/* Green Speech Bubble */}
-            <circle cx="21.5" cy="8.5" r="5.5" fill="#3cdb73" />
+            {/* Terracotta Speech Bubble */}
+            <circle cx="21.5" cy="8.5" r="5.5" fill="#D96B43" />
             <path
               d="M18.5 12.5l2-3.5 3 1.5z"
-              fill="#3cdb73"
+              fill="#D96B43"
             />
 
             {/* White Infinity Symbol inside Bubble */}
@@ -762,61 +921,96 @@ export default function App() {
             <div className="brand-name">{platformName}</div>
             <div className="brand-sub">Platform console</div>
           </div>
+          <button
+            type="button"
+            className="mobile-sidebar-close"
+            onClick={() => setMobileSidebarOpen(false)}
+            title="Close navigation menu"
+          >
+            <X size={18} />
+          </button>
         </div>
         <div className="tier-badge">Super admin</div>
 
         <nav style={{ display: "flex", flexDirection: "column", width: "100%" }}>
           <button
             className={`nav-item ${activePage === "overview" ? "active" : ""}`}
-            onClick={() => setActivePage("overview")}
+            onClick={() => {
+              setActivePage("overview");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">◈</span>Overview
           </button>
           <button
             className={`nav-item ${activePage === "orgs" ? "active" : ""}`}
-            onClick={() => setActivePage("orgs")}
+            onClick={() => {
+              setActivePage("orgs");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">▣</span>Organizations
           </button>
           <button
             className={`nav-item ${activePage === "users" ? "active" : ""}`}
-            onClick={() => setActivePage("users")}
+            onClick={() => {
+              setActivePage("users");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">☰</span>Users
           </button>
           <button
             className={`nav-item ${activePage === "plans" ? "active" : ""}`}
-            onClick={() => setActivePage("plans")}
+            onClick={() => {
+              setActivePage("plans");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">◍</span>Plans &amp; billing
           </button>
           <button
             className={`nav-item ${activePage === "flags" ? "active" : ""}`}
-            onClick={() => setActivePage("flags")}
+            onClick={() => {
+              setActivePage("flags");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">⚑</span>Feature flags
           </button>
           <button
             className={`nav-item ${activePage === "logs" ? "active" : ""}`}
-            onClick={() => setActivePage("logs")}
+            onClick={() => {
+              setActivePage("logs");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">◧</span>System logs
           </button>
           <button
             className={`nav-item ${activePage === "security" ? "active" : ""}`}
-            onClick={() => setActivePage("security")}
+            onClick={() => {
+              setActivePage("security");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">⚿</span>Security
           </button>
           <button
             className={`nav-item ${activePage === "support" ? "active" : ""}`}
-            onClick={() => setActivePage("support")}
+            onClick={() => {
+              setActivePage("support");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">◐</span>Support
           </button>
           <button
             className={`nav-item ${activePage === "settings" ? "active" : ""}`}
-            onClick={() => setActivePage("settings")}
+            onClick={() => {
+              setActivePage("settings");
+              setMobileSidebarOpen(false);
+            }}
           >
             <span className="nav-icon">✎</span>Platform settings
           </button>
@@ -843,20 +1037,91 @@ export default function App() {
 
       {/* MAIN CONTAINER */}
       <div className="main">
+        {/* PERSISTENT MAINTENANCE MODE WARNING BANNER */}
+        {isMaintenanceActive && (
+          <div className="maintenance-topbar-banner">
+            <div className="maintenance-topbar-content">
+              <span className="maintenance-icon">⚠️</span>
+              <span>
+                <strong>System Maintenance Mode is ACTIVE</strong> — All non-superadmin traffic and customer logins are currently blocked.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn-deactivate-maint"
+              disabled={busy === "toggle-maint"}
+              onClick={async () => {
+                setBusy("toggle-maint");
+                try {
+                  await api.toggleSecurity("maint", false);
+                  setSecurityFlags((prev) =>
+                    prev.map((s) => (s.id === "maint" || s.id === "maintenance" ? { ...s, enabled: false } : s))
+                  );
+                  triggerToast("Maintenance mode deactivated. Customer access restored.");
+                } catch (err) {
+                  triggerToast(apiErrorMessage(err, "Failed to deactivate maintenance mode"));
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            >
+              {busy === "toggle-maint" ? "Deactivating…" : "Deactivate Mode"}
+            </button>
+          </div>
+        )}
+
         {/* TOPBAR HEADER */}
         <header className="topbar">
-          <div className="crumbs">
-            Platform / <b style={{ textTransform: "capitalize" }}>{activePage === "orgs" ? "organizations" : activePage}</b>
+          <div className="topbar-left">
+            <button
+              type="button"
+              className="mobile-menu-btn"
+              onClick={() => setMobileSidebarOpen(true)}
+              title="Open navigation menu"
+              aria-label="Open navigation menu"
+            >
+              <Menu size={18} />
+            </button>
+            <div className="crumbs">
+              Platform / <b style={{ textTransform: "capitalize" }}>{activePage === "orgs" ? "organizations" : activePage}</b>
+            </div>
           </div>
           <div className="top-actions">
-            <div className="search">
+            <div className="search-wrapper">
+              <Search size={14} className="search-icon" />
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder={searchPlaceholder}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setOrgPage(1);
+                  setUserPage(1);
+                  setLogsPage(1);
+                }}
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="search-clear-btn"
+                  onClick={() => setSearchQuery("")}
+                  title="Clear search"
+                >
+                  <X size={13} />
+                </button>
+              )}
             </div>
+
+            <button
+              className="btn-refresh"
+              disabled={isRefreshing}
+              onClick={handleRefreshAll}
+              title="Refresh all platform data from database"
+            >
+              <RefreshCw size={14} className={isRefreshing ? "spin-icon" : ""} />
+              <span>{isRefreshing ? "Refreshing…" : "Refresh Data"}</span>
+            </button>
+
             {activePage === "orgs" && (
               <button
                 className="btn btn-primary"
@@ -900,11 +1165,11 @@ export default function App() {
             </div>
 
             <div className="panel-head">
-              <h2>Recent Platform Activity</h2>
+              <h2>Recent Platform Activity {searchQuery ? `(Search: "${searchQuery}")` : ""}</h2>
             </div>
-            {organizations.length > 0 ? (
+            {filteredRecentOrgs.length > 0 ? (
               <div className="card" style={{ padding: "4px 14px" }}>
-                {organizations.slice(0, 5).map((org) => (
+                {filteredRecentOrgs.map((org) => (
                   <div className="log-row" key={org.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                       <span className={`log-tag ${org.isApproved ? "info" : "sec"}`}>
@@ -930,9 +1195,13 @@ export default function App() {
                 <div className="empty-invoices-icon">
                   <Building2 size={20} />
                 </div>
-                <div className="empty-invoices-title">No platform activity yet</div>
+                <div className="empty-invoices-title">
+                  {searchQuery ? "No matching platform activity" : "No platform activity yet"}
+                </div>
                 <div className="empty-invoices-sub">
-                  When new organizations sign up or update their subscriptions, their events will appear here in real-time.
+                  {searchQuery
+                    ? `No organizations or events matched "${searchQuery}". Try clearing search.`
+                    : "When new organizations sign up or update their subscriptions, their events will appear here in real-time."}
                 </div>
               </div>
             )}
@@ -1220,6 +1489,7 @@ export default function App() {
                               title="Delete organization"
                               onClick={() => {
                                 setOrgToDelete(org);
+                                setDeleteConfirmName("");
                                 setIsDeleteModalOpen(true);
                               }}
                             >
@@ -1233,7 +1503,7 @@ export default function App() {
                   {processedOrgs.length === 0 && (
                     <tr>
                       <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
-                        No organizations found matching the selected filters.
+                        {searchQuery ? `No organizations found matching "${searchQuery}".` : "No organizations found matching the selected filters."}
                       </td>
                     </tr>
                   )}
@@ -1253,16 +1523,33 @@ export default function App() {
                       className="page-nav-btn"
                       disabled={orgPage <= 1}
                       onClick={() => setOrgPage((p) => Math.max(1, p - 1))}
+                      title="Previous page"
                     >
                       <ChevronLeft size={14} /> Prev
                     </button>
-                    <span style={{ fontSize: "12px", fontWeight: 600, padding: "0 6px" }}>
-                      Page {orgPage} of {totalOrgPages}
-                    </span>
+                    {Array.from({ length: totalOrgPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalOrgPages || Math.abs(p - orgPage) <= 1)
+                      .map((p, idx, arr) => {
+                        const prev = arr[idx - 1];
+                        return (
+                          <span key={p} style={{ display: "inline-flex", alignItems: "center" }}>
+                            {prev && p - prev > 1 && (
+                              <span style={{ padding: "0 4px", color: "var(--muted)", fontSize: "12px" }}>…</span>
+                            )}
+                            <button
+                              className={`page-nav-btn ${p === orgPage ? "active" : ""}`}
+                              onClick={() => setOrgPage(p)}
+                            >
+                              {p}
+                            </button>
+                          </span>
+                        );
+                      })}
                     <button
                       className="page-nav-btn"
                       disabled={orgPage >= totalOrgPages}
                       onClick={() => setOrgPage((p) => Math.min(totalOrgPages, p + 1))}
+                      title="Next page"
                     >
                       Next <ChevronRight size={14} />
                     </button>
@@ -1581,7 +1868,7 @@ export default function App() {
                   {processedUsers.length === 0 && (
                     <tr>
                       <td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
-                        No users found matching the selected filters.
+                        {searchQuery ? `No users found matching "${searchQuery}".` : "No users found matching the selected filters."}
                       </td>
                     </tr>
                   )}
@@ -1601,16 +1888,33 @@ export default function App() {
                       className="page-nav-btn"
                       disabled={userPage <= 1}
                       onClick={() => setUserPage((p) => Math.max(1, p - 1))}
+                      title="Previous page"
                     >
                       <ChevronLeft size={14} /> Prev
                     </button>
-                    <span style={{ fontSize: "12px", fontWeight: 600, padding: "0 6px" }}>
-                      Page {userPage} of {totalUserPages}
-                    </span>
+                    {Array.from({ length: totalUserPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalUserPages || Math.abs(p - userPage) <= 1)
+                      .map((p, idx, arr) => {
+                        const prev = arr[idx - 1];
+                        return (
+                          <span key={p} style={{ display: "inline-flex", alignItems: "center" }}>
+                            {prev && p - prev > 1 && (
+                              <span style={{ padding: "0 4px", color: "var(--muted)", fontSize: "12px" }}>…</span>
+                            )}
+                            <button
+                              className={`page-nav-btn ${p === userPage ? "active" : ""}`}
+                              onClick={() => setUserPage(p)}
+                            >
+                              {p}
+                            </button>
+                          </span>
+                        );
+                      })}
                     <button
                       className="page-nav-btn"
                       disabled={userPage >= totalUserPages}
                       onClick={() => setUserPage((p) => Math.min(totalUserPages, p + 1))}
+                      title="Next page"
                     >
                       Next <ChevronRight size={14} />
                     </button>
@@ -1828,7 +2132,7 @@ export default function App() {
             </div>
 
             <div className="panel-head" style={{ marginTop: "32px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2>Recent Invoices &amp; Receipts</h2>
+              <h2>Recent Invoices &amp; Receipts {searchQuery ? `(Search: "${searchQuery}" — ${filteredInvoices.length} found)` : `(${invoices.length})`}</h2>
               <button
                 className="btn btn-primary"
                 style={{ height: "34px", fontSize: "12.5px", borderRadius: "6px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "6px" }}
@@ -1840,7 +2144,7 @@ export default function App() {
                 + Record Invoice
               </button>
             </div>
-            {invoices.length > 0 ? (
+            {filteredInvoices.length > 0 ? (
               <div className="card" style={{ padding: "8px 16px" }}>
                 <table className="tbl">
                   <thead>
@@ -1855,7 +2159,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {invoices.map((inv, idx) => (
+                    {filteredInvoices.map((inv, idx) => (
                       <tr key={inv.id || idx}>
                         <td className="mono" style={{ fontWeight: 600 }}>{inv.invoiceNumber || `INV-${idx + 1}`}</td>
                         <td style={{ fontWeight: 500 }}>{inv.orgName}</td>
@@ -1875,6 +2179,7 @@ export default function App() {
                               rel="noopener noreferrer"
                               className="row-action"
                               style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                              title="Print or save tax invoice PDF"
                             >
                               <FileText size={12} /> Print PDF
                             </a>
@@ -1890,9 +2195,13 @@ export default function App() {
                 <div className="empty-invoices-icon">
                   <BarChart2 size={20} />
                 </div>
-                <div className="empty-invoices-title">No recent invoices generated</div>
+                <div className="empty-invoices-title">
+                  {searchQuery ? "No matching invoices found" : "No recent invoices generated"}
+                </div>
                 <div className="empty-invoices-sub">
-                  Billing statements and payment receipts for subscribed organizations will automatically appear here.
+                  {searchQuery
+                    ? `No billing receipts matched "${searchQuery}". Clear search to view all invoices.`
+                    : "Billing statements and payment receipts for subscribed organizations will automatically appear here."}
                 </div>
               </div>
             )}
@@ -1904,61 +2213,75 @@ export default function App() {
             <p className="page-sub">Turn modules on or off platform-wide, independent of plan.</p>
 
             <div className="flags-grid">
-              <div className="card" style={{ padding: "4px 14px" }}>
-                {featureFlags.slice(0, 3).map((f) => (
-                  <div className="flag-row" key={f.id}>
-                    <div>
-                      <div className="lbl">{f.label}</div>
-                      <div className="sub">{f.sub}</div>
-                    </div>
-                    <button
-                      className={`switch ${f.enabled ? "on" : ""}`}
-                      onClick={async () => {
-                        const nextVal = !f.enabled;
-                        try {
-                          await api.toggleFlag(f.id, nextVal);
-                          setFeatureFlags((prev) =>
-                            prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: nextVal } : flag)),
-                          );
-                          triggerToast(`${f.label} flag ${nextVal ? "enabled" : "disabled"}`);
-                        } catch (err) {
-                          triggerToast(apiErrorMessage(err, "Failed to toggle flag"));
-                        }
-                      }}
-                    >
-                      <div className="knob"></div>
-                    </button>
+              {filteredFlags.length > 0 ? (
+                <>
+                  <div className="card" style={{ padding: "4px 14px" }}>
+                    {filteredFlags.slice(0, Math.ceil(filteredFlags.length / 2)).map((f) => (
+                      <div className="flag-row" key={f.id}>
+                        <div>
+                          <div className="lbl">{f.label}</div>
+                          <div className="sub">{f.sub}</div>
+                        </div>
+                        <button
+                          className={`switch ${f.enabled ? "on" : ""}`}
+                          onClick={async () => {
+                            const nextVal = !f.enabled;
+                            try {
+                              await api.toggleFlag(f.id, nextVal);
+                              setFeatureFlags((prev) =>
+                                prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: nextVal } : flag)),
+                              );
+                              triggerToast(`${f.label} flag ${nextVal ? "enabled" : "disabled"}`);
+                            } catch (err) {
+                              triggerToast(apiErrorMessage(err, "Failed to toggle flag"));
+                            }
+                          }}
+                        >
+                          <div className="knob"></div>
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
 
-              <div className="card" style={{ padding: "4px 14px" }}>
-                {featureFlags.slice(3, 6).map((f) => (
-                  <div className="flag-row" key={f.id}>
-                    <div>
-                      <div className="lbl">{f.label}</div>
-                      <div className="sub">{f.sub}</div>
-                    </div>
-                    <button
-                      className={`switch ${f.enabled ? "on" : ""}`}
-                      onClick={async () => {
-                        const nextVal = !f.enabled;
-                        try {
-                          await api.toggleFlag(f.id, nextVal);
-                          setFeatureFlags((prev) =>
-                            prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: nextVal } : flag)),
-                          );
-                          triggerToast(`${f.label} flag ${nextVal ? "enabled" : "disabled"}`);
-                        } catch (err) {
-                          triggerToast(apiErrorMessage(err, "Failed to toggle flag"));
-                        }
-                      }}
-                    >
-                      <div className="knob"></div>
-                    </button>
+                  <div className="card" style={{ padding: "4px 14px" }}>
+                    {filteredFlags.slice(Math.ceil(filteredFlags.length / 2)).map((f) => (
+                      <div className="flag-row" key={f.id}>
+                        <div>
+                          <div className="lbl">{f.label}</div>
+                          <div className="sub">{f.sub}</div>
+                        </div>
+                        <button
+                          className={`switch ${f.enabled ? "on" : ""}`}
+                          onClick={async () => {
+                            const nextVal = !f.enabled;
+                            try {
+                              await api.toggleFlag(f.id, nextVal);
+                              setFeatureFlags((prev) =>
+                                prev.map((flag) => (flag.id === f.id ? { ...flag, enabled: nextVal } : flag)),
+                              );
+                              triggerToast(`${f.label} flag ${nextVal ? "enabled" : "disabled"}`);
+                            } catch (err) {
+                              triggerToast(apiErrorMessage(err, "Failed to toggle flag"));
+                            }
+                          }}
+                        >
+                          <div className="knob"></div>
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              ) : (
+                <div className="empty-invoices-card" style={{ gridColumn: "1 / -1" }}>
+                  <div className="empty-invoices-icon">
+                    <Flag size={20} />
+                  </div>
+                  <div className="empty-invoices-title">No feature flags found</div>
+                  <div className="empty-invoices-sub">
+                    No feature flags matched "{searchQuery}". Clear search to view all flags.
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2014,7 +2337,7 @@ export default function App() {
             </div>
 
             <div className="panel-head">
-              <h2>Audit stream</h2>
+              <h2>Audit stream {searchQuery ? `(Search: "${searchQuery}" — ${filteredLogs.length} found)` : ""}</h2>
               <button
                 className="btn btn-sm"
                 onClick={() => {
@@ -2071,16 +2394,33 @@ export default function App() {
                       className="page-nav-btn"
                       disabled={logsPage <= 1}
                       onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
+                      title="Previous page"
                     >
                       <ChevronLeft size={14} /> Prev
                     </button>
-                    <span style={{ fontSize: "12px", fontWeight: 600, padding: "0 6px" }}>
-                      Page {logsPage} of {totalLogPages}
-                    </span>
+                    {Array.from({ length: totalLogPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalLogPages || Math.abs(p - logsPage) <= 1)
+                      .map((p, idx, arr) => {
+                        const prev = arr[idx - 1];
+                        return (
+                          <span key={p} style={{ display: "inline-flex", alignItems: "center" }}>
+                            {prev && p - prev > 1 && (
+                              <span style={{ padding: "0 4px", color: "var(--muted)", fontSize: "12px" }}>…</span>
+                            )}
+                            <button
+                              className={`page-nav-btn ${p === logsPage ? "active" : ""}`}
+                              onClick={() => setLogsPage(p)}
+                            >
+                              {p}
+                            </button>
+                          </span>
+                        );
+                      })}
                     <button
                       className="page-nav-btn"
                       disabled={logsPage >= totalLogPages}
                       onClick={() => setLogsPage((p) => Math.min(totalLogPages, p + 1))}
+                      title="Next page"
                     >
                       Next <ChevronRight size={14} />
                     </button>
@@ -2092,9 +2432,13 @@ export default function App() {
                 <div className="empty-invoices-icon">
                   <Shield size={20} />
                 </div>
-                <div className="empty-invoices-title">No system logs found</div>
+                <div className="empty-invoices-title">
+                  {searchQuery ? "No matching system logs" : "No system logs found"}
+                </div>
                 <div className="empty-invoices-sub">
-                  Platform security events, workspace registrations, and user activities will automatically stream here.
+                  {searchQuery
+                    ? `No audit logs matched "${searchQuery}". Try clearing search.`
+                    : "Platform security events, workspace registrations, and user activities will automatically stream here."}
                 </div>
               </div>
             )}
@@ -2105,38 +2449,54 @@ export default function App() {
             <h1 className="page-title">Security</h1>
             <p className="page-sub">Platform-wide authentication and access policies.</p>
 
-            <div className="card" style={{ padding: "4px 14px", maxWidth: "600px" }}>
-              {securityFlags.map((sec) => (
-                <div className="flag-row" key={sec.id}>
-                  <div>
-                    <div className="lbl">{sec.label}</div>
-                    <div className="sub">{sec.sub}</div>
+            {filteredSecurity.length > 0 ? (
+              <div className="card" style={{ padding: "4px 14px", maxWidth: "600px" }}>
+                {filteredSecurity.map((sec) => (
+                  <div className="flag-row" key={sec.id}>
+                    <div>
+                      <div className="lbl">{sec.label}</div>
+                      <div className="sub">{sec.sub}</div>
+                    </div>
+                    <button
+                      className={`switch ${sec.enabled ? "on" : ""}`}
+                      disabled={busy === `sec-${sec.id}`}
+                      onClick={async () => {
+                        const nextVal = !sec.enabled;
+                        setBusy(`sec-${sec.id}`);
+                        try {
+                          await api.toggleSecurity(sec.id, nextVal);
+                          setSecurityFlags((prev) =>
+                            prev.map((s) => (s.id === sec.id ? { ...s, enabled: nextVal } : s)),
+                          );
+                          triggerToast(`${sec.label} policy ${nextVal ? "activated" : "deactivated"}`);
+                        } catch (err) {
+                          triggerToast(apiErrorMessage(err, "Failed to update security policy"));
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                    >
+                      <div className="knob"></div>
+                    </button>
                   </div>
-                  <button
-                    className={`switch ${sec.enabled ? "on" : ""}`}
-                    onClick={async () => {
-                      const nextVal = !sec.enabled;
-                      try {
-                        await api.toggleSecurity(sec.id, nextVal);
-                        setSecurityFlags((prev) =>
-                          prev.map((s) => (s.id === sec.id ? { ...s, enabled: nextVal } : s)),
-                        );
-                        triggerToast(`${sec.label} policy ${nextVal ? "activated" : "deactivated"}`);
-                      } catch (err) {
-                        triggerToast(apiErrorMessage(err, "Failed to update security policy"));
-                      }
-                    }}
-                  >
-                    <div className="knob"></div>
-                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-invoices-card" style={{ maxWidth: "600px" }}>
+                <div className="empty-invoices-icon">
+                  <Shield size={20} />
                 </div>
-              ))}
-            </div>
+                <div className="empty-invoices-title">No security policies found</div>
+                <div className="empty-invoices-sub">
+                  No security policies matched "{searchQuery}". Clear search to view all policies.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 8. SUPPORT SCREEN (Connected to Backend API) */}
           <div className={`page ${activePage === "support" ? "active" : ""}`}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px", flexWrap: "wrap", gap: "12px" }}>
               <div>
                 <h1 className="page-title">Support &amp; Helpdesk</h1>
                 <p className="page-sub">Client issue tickets, 1-click workspace impersonation, and live threaded resolution.</p>
@@ -2153,8 +2513,42 @@ export default function App() {
               </button>
             </div>
 
+            {/* Support Ticket Status Filter Pills */}
+            <div className="filter-pills">
+              <button
+                className={`filter-pill ${ticketStatusFilter === "all" ? "active" : ""}`}
+                onClick={() => setTicketStatusFilter("all")}
+              >
+                All tickets <span className="count">{supportTickets.length}</span>
+              </button>
+              <button
+                className={`filter-pill ${ticketStatusFilter === "open" ? "active" : ""}`}
+                onClick={() => setTicketStatusFilter("open")}
+              >
+                Open <span className="count">{supportTickets.filter((t) => (t.status || "open") === "open").length}</span>
+              </button>
+              <button
+                className={`filter-pill ${ticketStatusFilter === "in_progress" ? "active" : ""}`}
+                onClick={() => setTicketStatusFilter("in_progress")}
+              >
+                In Progress <span className="count">{supportTickets.filter((t) => t.status === "in_progress").length}</span>
+              </button>
+              <button
+                className={`filter-pill ${ticketStatusFilter === "resolved" ? "active" : ""}`}
+                onClick={() => setTicketStatusFilter("resolved")}
+              >
+                Resolved <span className="count">{supportTickets.filter((t) => t.status === "resolved").length}</span>
+              </button>
+              <button
+                className={`filter-pill ${ticketStatusFilter === "closed" ? "active" : ""}`}
+                onClick={() => setTicketStatusFilter("closed")}
+              >
+                Closed <span className="count">{supportTickets.filter((t) => t.status === "closed").length}</span>
+              </button>
+            </div>
+
             <div className="panel-head">
-              <h2>Active Support Queue ({filteredTickets.length})</h2>
+              <h2>Support Queue {searchQuery ? `(Search: "${searchQuery}" — ${filteredTickets.length} found)` : `(${filteredTickets.length})`}</h2>
             </div>
             {filteredTickets.length > 0 ? (
               <div className="card" style={{ padding: "8px 16px" }}>
@@ -2233,9 +2627,13 @@ export default function App() {
                 <div className="empty-invoices-icon">
                   <Shield size={20} />
                 </div>
-                <div className="empty-invoices-title">No active support tickets</div>
+                <div className="empty-invoices-title">
+                  {searchQuery || ticketStatusFilter !== "all" ? "No matching support tickets" : "No active support tickets"}
+                </div>
                 <div className="empty-invoices-sub">
-                  Customer help requests and escalated issues will automatically appear here.
+                  {searchQuery || ticketStatusFilter !== "all"
+                    ? `No tickets match the active filter or query "${searchQuery}". Clear filters to view all tickets.`
+                    : "Customer help requests and escalated issues will automatically appear here."}
                 </div>
               </div>
             )}
@@ -2399,10 +2797,29 @@ export default function App() {
                   <button
                     className="swatch"
                     style={{
-                      background: "#3cdb73",
-                      border: accentColor === "#3cdb73" ? "2px solid var(--text)" : "none",
+                      background: "#D96B43",
+                      border: accentColor === "#D96B43" ? "2px solid var(--text)" : "none",
                     }}
-                    onClick={() => setAccentColor("#3cdb73")}
+                    onClick={() => setAccentColor("#D96B43")}
+                    title="Terracotta Primary"
+                  />
+                  <button
+                    className="swatch"
+                    style={{
+                      background: "#5E9E82",
+                      border: accentColor === "#5E9E82" ? "2px solid var(--text)" : "none",
+                    }}
+                    onClick={() => setAccentColor("#5E9E82")}
+                    title="Sage Green"
+                  />
+                  <button
+                    className="swatch"
+                    style={{
+                      background: "#D4A338",
+                      border: accentColor === "#D4A338" ? "2px solid var(--text)" : "none",
+                    }}
+                    onClick={() => setAccentColor("#D4A338")}
+                    title="Mustard Gold"
                   />
                   <button
                     className="swatch"
@@ -2411,14 +2828,7 @@ export default function App() {
                       border: accentColor === "#2F8F80" ? "2px solid var(--text)" : "none",
                     }}
                     onClick={() => setAccentColor("#2F8F80")}
-                  />
-                  <button
-                    className="swatch"
-                    style={{
-                      background: "#C98A2C",
-                      border: accentColor === "#C98A2C" ? "2px solid var(--text)" : "none",
-                    }}
-                    onClick={() => setAccentColor("#C98A2C")}
+                    title="Teal Ocean"
                   />
                 </div>
               </div>
@@ -2501,37 +2911,80 @@ export default function App() {
         </div>
       </div>
 
-      {/* DELETE CONFIRMATION MODAL OVERLAY */}
+      {/* DELETE CONFIRMATION MODAL OVERLAY (With Double Confirmation Name Verification) */}
       <div className={`overlay ${isDeleteModalOpen ? "open" : ""}`}>
-        <div className="modal">
-          <h3 style={{ color: "var(--red)" }}>Delete organization</h3>
-          <p className="sub" style={{ marginTop: "8px", marginBottom: "18px" }}>
-            Are you sure you want to permanently delete <strong>{orgToDelete?.name}</strong>? This action is irreversible and all workspace data will be removed.
+        <div className="modal" style={{ maxWidth: "480px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+            <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "var(--red-dim)", color: "var(--red)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Trash2 size={18} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, color: "var(--red)", fontSize: "18px" }}>Delete Organization</h3>
+              <span style={{ fontSize: "12px", color: "var(--muted)" }}>Permanent tenant &amp; data deletion</span>
+            </div>
+          </div>
+
+          <p className="sub" style={{ marginTop: "4px", marginBottom: "14px", lineHeight: "1.5" }}>
+            Are you sure you want to permanently delete <strong>{orgToDelete?.name}</strong>? This action is <strong>irreversible</strong> and will permanently wipe all users, tickets, settings, and logs associated with this workspace.
           </p>
+
+          <div className="field" style={{ marginBottom: "18px" }}>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "var(--ink)", marginBottom: "6px" }}>
+              To confirm deletion, type <span style={{ fontFamily: "var(--font-mono)", color: "var(--red)", fontWeight: 700, userSelect: "all" }}>{orgToDelete?.name}</span> below:
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmName}
+              onChange={(e) => setDeleteConfirmName(e.target.value)}
+              placeholder={`Type "${orgToDelete?.name || ""}" to confirm`}
+              style={{
+                width: "100%",
+                padding: "9px 12px",
+                border: deleteConfirmName === orgToDelete?.name ? "2px solid var(--red)" : "1px solid var(--line)",
+                borderRadius: "6px",
+                fontFamily: "var(--font-mono)",
+                fontSize: "13.5px",
+                color: "var(--ink)",
+                background: "var(--paper)",
+                outline: "none",
+              }}
+            />
+          </div>
+
           <div className="modal-foot">
-            <button className="btn" onClick={() => {
-              setIsDeleteModalOpen(false);
-              setOrgToDelete(null);
-            }}>
+            <button
+              className="btn"
+              onClick={() => {
+                setIsDeleteModalOpen(false);
+                setOrgToDelete(null);
+                setDeleteConfirmName("");
+              }}
+            >
               Cancel
             </button>
             <button
               className="btn btn-primary"
-              style={{ background: "var(--red)", borderColor: "var(--red)" }}
-              disabled={busy === orgToDelete?.id}
+              style={{
+                background: deleteConfirmName.trim() === (orgToDelete?.name || "").trim() ? "var(--red)" : "var(--paper-2)",
+                borderColor: deleteConfirmName.trim() === (orgToDelete?.name || "").trim() ? "var(--red)" : "var(--line)",
+                color: deleteConfirmName.trim() === (orgToDelete?.name || "").trim() ? "#FFFFFF" : "var(--muted)",
+                cursor: deleteConfirmName.trim() === (orgToDelete?.name || "").trim() ? "pointer" : "not-allowed",
+              }}
+              disabled={deleteConfirmName.trim() !== (orgToDelete?.name || "").trim() || busy === orgToDelete?.id}
               onClick={() => {
-                if (orgToDelete) {
+                if (orgToDelete && deleteConfirmName.trim() === orgToDelete.name.trim()) {
                   void runBackendAction(
                     orgToDelete.id,
                     () => api.remove(orgToDelete.id),
-                    `Deleted ${orgToDelete.name}`,
+                    `Deleted "${orgToDelete.name}" permanently`,
                   );
                 }
                 setIsDeleteModalOpen(false);
                 setOrgToDelete(null);
+                setDeleteConfirmName("");
               }}
             >
-              Delete permanently
+              {busy === orgToDelete?.id ? "Deleting…" : "Delete permanently"}
             </button>
           </div>
         </div>
