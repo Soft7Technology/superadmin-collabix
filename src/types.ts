@@ -43,4 +43,29 @@ export interface SystemLog {
   timestamp: string;
 }
 
+export interface SupportTicket {
+  id: string;
+  ticketNumber: string;
+  title: string;
+  description?: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+  openedAt: string;
+  orgName: string;
+  organizationId?: string;
+  escalatedToSuper?: boolean;
+  escalatedAt?: string;
+  escalatedByName?: string;
+}
+
+export interface SupportTicketReply {
+  id: string;
+  ticketId: string;
+  senderId?: string;
+  senderName: string;
+  senderRole: string;
+  message: string;
+  createdAt: string;
+}
+
 
