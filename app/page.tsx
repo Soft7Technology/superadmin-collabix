@@ -51,9 +51,27 @@ interface Invoice {
 
 interface SupportTicket {
   id: string;
+  ticketNumber: string;
   title: string;
+  description?: string;
   orgName: string;
+  organizationId?: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
   openedAt: string;
+  escalatedToSuper?: boolean;
+  escalatedAt?: string;
+  escalatedByName?: string;
+}
+
+interface SupportTicketReply {
+  id: string;
+  ticketId: string;
+  senderId?: string;
+  senderName: string;
+  senderRole: string;
+  message: string;
+  createdAt: string;
 }
 
 interface FeatureFlag {
@@ -189,6 +207,14 @@ export default function App() {
 
   // Support tickets — loaded from backend
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [escalatedTickets, setEscalatedTickets] = useState<SupportTicket[]>([]);
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+  const [ticketReplies, setTicketReplies] = useState<SupportTicketReply[]>([]);
+  const [isLoadingReplies, setIsLoadingReplies] = useState(false);
+  const [ticketReplyText, setTicketReplyText] = useState("");
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [supportTicketTab, setSupportTicketTab] = useState<"escalated" | "all">("escalated");
+  const [isUpdatingTicket, setIsUpdatingTicket] = useState(false);
 
   // System logs — loaded from backend
   const [systemLogs, setSystemLogs] = useState<SystemLog[]>([]);
@@ -245,6 +271,31 @@ export default function App() {
       })
       .catch(() => setSession("guest"));
   }, [loadOrganizations, loadUsers, loadLogs]);
+
+  // Load support tickets when support page is active
+  useEffect(() => {
+    if (activePage === "support") {
+      api.escalatedTickets().then(setEscalatedTickets).catch(() => {});
+      api.tickets().then(setSupportTickets).catch(() => {});
+    }
+  }, [activePage]);
+
+  // Load ticket replies when a ticket is selected
+  useEffect(() => {
+    if (!selectedTicket) {
+      setTicketReplies([]);
+      return;
+    }
+    setIsLoadingReplies(true);
+    api.ticketReplies(selectedTicket.id)
+      .then(setTicketReplies)
+      .catch(() => {})
+      .finally(() => setIsLoadingReplies(false));
+    const interval = setInterval(() => {
+      api.ticketReplies(selectedTicket.id).then(setTicketReplies).catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [selectedTicket?.id]);
 
   // Helper to trigger toast notification
   const triggerToast = (msg: unknown) => {
@@ -519,6 +570,36 @@ export default function App() {
   const suspendedCount = organizations.filter(
     (org) => org.subscriptionStatus === "revoked" || org.subscriptionStatus === "expired",
   ).length;
+
+  // Support ticket helpers
+  const handleSendTicketReply = async () => {
+    if (!selectedTicket || !ticketReplyText.trim()) return;
+    setIsSendingReply(true);
+    try {
+      const reply = await api.createTicketReply(selectedTicket.id, ticketReplyText.trim());
+      setTicketReplies((prev) => [...prev, reply]);
+      setTicketReplyText("");
+    } catch {
+      triggerToast("Failed to send reply");
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
+
+  const handleUpdateTicketStatus = async (ticketId: string, status: string) => {
+    setIsUpdatingTicket(true);
+    try {
+      await api.updateTicket(ticketId, { status });
+      setSupportTickets((prev) => prev.map((t) => t.id === ticketId ? { ...t, status: status as any } : t));
+      setEscalatedTickets((prev) => prev.map((t) => t.id === ticketId ? { ...t, status: status as any } : t));
+      if (selectedTicket?.id === ticketId) setSelectedTicket((prev) => prev ? { ...prev, status: status as any } : null);
+      triggerToast(`Ticket marked as ${status.replace("_", " ")}`);
+    } catch {
+      triggerToast("Failed to update ticket status");
+    } finally {
+      setIsUpdatingTicket(false);
+    }
+  };
 
   return (
     <div className="app">
@@ -1801,27 +1882,199 @@ export default function App() {
             </div>
           </div>
 
-          {/* 8. SUPPORT SCREEN (Mock client side) */}
+          {/* 8. SUPPORT SCREEN */}
           <div className={`page ${activePage === "support" ? "active" : ""}`}>
             <h1 className="page-title">Support</h1>
-            <p className="page-sub">Open tickets and org impersonation for troubleshooting.</p>
+            <p className="page-sub">Manage escalated tickets and all support requests.</p>
 
-            <div className="panel-head">
-              <h2>Open tickets</h2>
+            {/* Tab switcher */}
+            <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+              <button
+                className={`btn btn-sm ${supportTicketTab === "escalated" ? "btn-primary" : ""}`}
+                onClick={() => setSupportTicketTab("escalated")}
+              >
+                🔺 Escalated ({escalatedTickets.length})
+              </button>
+              <button
+                className={`btn btn-sm ${supportTicketTab === "all" ? "btn-primary" : ""}`}
+                onClick={() => setSupportTicketTab("all")}
+              >
+                All Tickets ({supportTickets.length})
+              </button>
             </div>
-            <div className="card" style={{ padding: "2px 12px" }}>
-              {filteredTickets.map((t) => (
-                <div className="ticket-row" key={t.id}>
-                  <span>
-                    {t.title}
-                    <div className="ticket-org">{t.orgName} · Opened {t.openedAt}</div>
-                  </span>
-                  <button className="btn btn-sm" onClick={() => triggerToast(`Opening ticket #${t.id}...`)}>
-                    Open
-                  </button>
+
+            {/* Ticket list */}
+            <div className="card" style={{ padding: "2px 12px", marginBottom: "24px" }}>
+              <div className="panel-head">
+                <h2>{supportTicketTab === "escalated" ? "Escalated Tickets" : "All Tickets"}</h2>
+              </div>
+              {(supportTicketTab === "escalated" ? escalatedTickets : filteredTickets).length === 0 ? (
+                <p style={{ color: "var(--muted)", fontSize: "13px", padding: "16px 0" }}>
+                  {supportTicketTab === "escalated"
+                    ? "No escalated tickets at the moment."
+                    : "No support tickets found."}
+                </p>
+              ) : (
+                (supportTicketTab === "escalated" ? escalatedTickets : filteredTickets).map((t) => (
+                  <div
+                    className="ticket-row"
+                    key={t.id}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setSelectedTicket(t)}
+                  >
+                    <span>
+                      <div style={{ fontWeight: 600, fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                        {t.ticketNumber ? `#${t.ticketNumber} — ` : ""}{t.title}
+                        {t.escalatedToSuper && (
+                          <span style={{
+                            fontSize: "10px", padding: "2px 6px",
+                            background: "rgba(147,51,234,0.1)", color: "#7c3aed",
+                            borderRadius: "4px", border: "1px solid rgba(147,51,234,0.3)",
+                            fontWeight: 700, textTransform: "uppercase"
+                          }}>Escalated</span>
+                        )}
+                      </div>
+                      <div className="ticket-org">
+                        {t.orgName} · {t.status ? t.status.replace("_", " ") : "open"} · {t.priority || "medium"}
+                        {t.escalatedAt && ` · Escalated ${new Date(t.escalatedAt).toLocaleDateString()}`}
+                        {t.escalatedByName && ` by ${t.escalatedByName}`}
+                      </div>
+                    </span>
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      {t.status !== "resolved" && t.status !== "closed" && (
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: "rgba(34,197,94,0.1)", color: "#16a34a", border: "1px solid rgba(34,197,94,0.3)" }}
+                          onClick={(e) => { e.stopPropagation(); handleUpdateTicketStatus(t.id, "resolved"); }}
+                        >
+                          Resolve
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-sm"
+                        onClick={(e) => { e.stopPropagation(); setSelectedTicket(t); }}
+                      >
+                        Open →
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Ticket thread modal */}
+            {selectedTicket && (
+              <div style={{
+                position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.6)",
+                display: "flex", alignItems: "center", justifyContent: "center", padding: "16px"
+              }}>
+                <div style={{
+                  background: "var(--surface)", border: "1px solid var(--border)",
+                  borderRadius: "16px", width: "100%", maxWidth: "640px",
+                  maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden",
+                  boxShadow: "0 25px 50px rgba(0,0,0,0.4)"
+                }}>
+                  {/* Modal header */}
+                  <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "4px" }}>
+                        {selectedTicket.ticketNumber && (
+                          <span style={{ fontFamily: "monospace", fontSize: "12px", fontWeight: 700, color: "var(--accent)" }}>
+                            #{selectedTicket.ticketNumber}
+                          </span>
+                        )}
+                        <span style={{ fontSize: "10px", padding: "1px 6px", background: "rgba(99,102,241,0.1)", color: "#6366f1", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "4px", textTransform: "uppercase", fontWeight: 700 }}>
+                          {selectedTicket.priority || "medium"}
+                        </span>
+                        <span style={{ fontSize: "10px", padding: "1px 6px", background: "rgba(34,197,94,0.1)", color: "#16a34a", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "4px", textTransform: "capitalize", fontWeight: 600 }}>
+                          {(selectedTicket.status || "open").replace("_", " ")}
+                        </span>
+                        {selectedTicket.escalatedToSuper && (
+                          <span style={{ fontSize: "10px", padding: "1px 6px", background: "rgba(147,51,234,0.1)", color: "#7c3aed", border: "1px solid rgba(147,51,234,0.3)", borderRadius: "4px", textTransform: "uppercase", fontWeight: 700 }}>
+                            Escalated ✓
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: "15px" }}>{selectedTicket.title}</div>
+                      <div style={{ fontSize: "12px", color: "var(--muted)", marginTop: "2px" }}>
+                        {selectedTicket.orgName}
+                        {selectedTicket.escalatedByName && ` · Escalated by ${selectedTicket.escalatedByName}`}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      {selectedTicket.status !== "resolved" && selectedTicket.status !== "closed" && (
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: "rgba(34,197,94,0.1)", color: "#16a34a", border: "1px solid rgba(34,197,94,0.3)" }}
+                          onClick={() => handleUpdateTicketStatus(selectedTicket.id, "resolved")}
+                          disabled={isUpdatingTicket}
+                        >
+                          Resolve
+                        </button>
+                      )}
+                      <button className="btn btn-sm" onClick={() => setSelectedTicket(null)}>✕</button>
+                    </div>
+                  </div>
+
+                  {/* Messages */}
+                  <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px", minHeight: "200px", maxHeight: "380px" }}>
+                    {selectedTicket.description && (
+                      <div style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: "8px", padding: "10px 12px", fontSize: "13px" }}>
+                        <div style={{ fontWeight: 600, fontSize: "11px", marginBottom: "4px", color: "#6366f1" }}>Original Description</div>
+                        {selectedTicket.description}
+                      </div>
+                    )}
+                    {isLoadingReplies && ticketReplies.length === 0 ? (
+                      <div style={{ textAlign: "center", color: "var(--muted)", fontSize: "13px", padding: "24px" }}>Loading conversation...</div>
+                    ) : ticketReplies.length === 0 ? (
+                      <div style={{ textAlign: "center", color: "var(--muted)", fontSize: "13px", padding: "24px" }}>No replies yet. Start the conversation below.</div>
+                    ) : (
+                      ticketReplies.map((reply) => {
+                        const isSuperAdminReply = reply.senderRole?.toLowerCase().includes("super");
+                        return (
+                          <div key={reply.id} style={{ display: "flex", flexDirection: "column", alignItems: isSuperAdminReply ? "flex-end" : "flex-start" }}>
+                            <div style={{ fontSize: "11px", color: "var(--muted)", marginBottom: "3px" }}>
+                              {reply.senderName} · {reply.senderRole}
+                            </div>
+                            <div style={{
+                              maxWidth: "80%", padding: "8px 12px", borderRadius: "10px", fontSize: "13px",
+                              background: isSuperAdminReply ? "rgba(99,102,241,0.15)" : "rgba(0,0,0,0.05)",
+                              border: `1px solid ${isSuperAdminReply ? "rgba(99,102,241,0.3)" : "var(--border)"}`,
+                            }}>
+                              {reply.message}
+                            </div>
+                            <div style={{ fontSize: "10px", color: "var(--muted)", marginTop: "2px" }}>
+                              {new Date(reply.createdAt).toLocaleString()}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Reply input */}
+                  <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: "8px" }}>
+                    <input
+                      type="text"
+                      className="input"
+                      style={{ flex: 1, fontSize: "13px" }}
+                      placeholder="Reply as Super Admin..."
+                      value={ticketReplyText}
+                      onChange={(e) => setTicketReplyText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendTicketReply(); } }}
+                      disabled={isSendingReply}
+                    />
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={handleSendTicketReply}
+                      disabled={!ticketReplyText.trim() || isSendingReply}
+                    >
+                      {isSendingReply ? "..." : "Send"}
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* 9. SETTINGS SCREEN (Mock client side) */}

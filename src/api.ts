@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { Organization, PlatformUser, SystemLog, User } from "./types";
+import type { Organization, PlatformUser, SystemLog, SupportTicket, SupportTicketReply, User } from "./types";
 
 const origin = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
@@ -93,6 +93,26 @@ export const api = {
   },
   logs: async () => {
     const { data } = await http.get<SystemLog[]>("/api/super/logs");
+    return data;
+  },
+  tickets: async () => {
+    const { data } = await http.get<SupportTicket[]>("/api/super/tickets");
+    return data;
+  },
+  escalatedTickets: async () => {
+    const { data } = await http.get<SupportTicket[]>("/api/super/tickets/escalated");
+    return data;
+  },
+  updateTicket: async (id: string, payload: { status?: string; priority?: string }) => {
+    const { data } = await http.patch<{ message: string; ticket: SupportTicket }>(`/api/super/tickets/${id}`, payload);
+    return data;
+  },
+  ticketReplies: async (id: string) => {
+    const { data } = await http.get<SupportTicketReply[]>(`/api/super/tickets/${id}/replies`);
+    return data;
+  },
+  createTicketReply: async (id: string, message: string) => {
+    const { data } = await http.post<SupportTicketReply>(`/api/super/tickets/${id}/replies`, { message });
     return data;
   },
 };
